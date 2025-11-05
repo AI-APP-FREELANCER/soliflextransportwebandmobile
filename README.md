@@ -102,7 +102,7 @@ See backend/routes/ for complete API documentation.
 ## Ports
 
 - **Backend**: 3000
-- **Frontend**: 8081
+- **Frontend**: 4000
 
 ## PM2 Management
 

@@ -25,7 +25,7 @@ sudo npm install -g http-server
 
 ```bash
 sudo ufw allow 3000/tcp
-sudo ufw allow 8081/tcp
+sudo ufw allow 4000/tcp
 sudo ufw allow 22/tcp
 sudo ufw enable
 sudo ufw status
@@ -99,7 +99,7 @@ pm2 logs
 ## Access URLs
 
 - **Backend**: `http://YOUR_VM_IP:3000`
-- **Frontend**: `http://YOUR_VM_IP:8081`
+- **Frontend**: `http://YOUR_VM_IP:4000`
 - **Health Check**: `http://YOUR_VM_IP:3000/health`
 
 Replace `YOUR_VM_IP` with your Azure VM's public IP address.

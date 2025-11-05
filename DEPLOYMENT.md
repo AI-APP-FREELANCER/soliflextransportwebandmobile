@@ -97,9 +97,9 @@ sudo npm install -g http-server
 ### Step 2.3: Configure Firewall
 
 ```bash
-# Allow ports 3000 (backend) and 8081 (frontend)
+# Allow ports 3000 (backend) and 4000 (frontend)
 sudo ufw allow 3000/tcp
-sudo ufw allow 8081/tcp
+sudo ufw allow 4000/tcp
 sudo ufw allow 22/tcp  # SSH
 sudo ufw allow 80/tcp  # HTTP (optional, for Nginx)
 sudo ufw allow 443/tcp # HTTPS (optional, for SSL)
@@ -231,7 +231,7 @@ pm2 monit
 
 # Check if ports are listening
 sudo netstat -tulpn | grep 3000
-sudo netstat -tulpn | grep 8081
+sudo netstat -tulpn | grep 4000
 
 # Test backend (replace YOUR_VM_IP with your actual VM IP)
 curl http://localhost:3000/health
@@ -256,7 +256,7 @@ curl http://YOUR_VM_IP:3000/health
 
 Open in your browser:
 ```
-http://YOUR_VM_IP:8081
+http://YOUR_VM_IP:4000
 ```
 
 ---
@@ -391,9 +391,9 @@ node server.js
 # Check logs
 pm2 logs soliflex-frontend --lines 50
 
-# Check if port 8081 is in use
-sudo lsof -i :8081
-sudo netstat -tulpn | grep 8081
+# Check if port 4000 is in use
+sudo lsof -i :4000
+sudo netstat -tulpn | grep 4000
 
 # Verify build directory exists
 ls -la ~/apps/soliflexweb/build/web/
@@ -403,7 +403,7 @@ which http-server
 
 # Test frontend manually
 cd ~/apps/soliflexweb
-http-server build/web -p 8081
+http-server build/web -p 4000
 ```
 
 ### PM2 not starting on boot:
@@ -466,7 +466,7 @@ server {
 
     # Frontend (Flutter web)
     location / {
-        proxy_pass http://localhost:8081;
+        proxy_pass http://localhost:4000;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
@@ -517,13 +517,13 @@ Now you can access:
 ## Summary
 
 ✅ **Backend**: Running on port 3000 via PM2  
-✅ **Frontend**: Running on port 8081 via PM2  
+✅ **Frontend**: Running on port 4000 via PM2  
 ✅ **PM2**: Auto-restart and startup on boot  
-✅ **Firewall**: Ports 3000 and 8081 open  
+✅ **Firewall**: Ports 3000 and 4000 open  
 
 **Access URLs:**
 - Backend API: `http://YOUR_VM_IP:3000`
-- Frontend: `http://YOUR_VM_IP:8081`
+- Frontend: `http://YOUR_VM_IP:4000`
 - With Nginx: `http://YOUR_VM_IP` (frontend) and `http://YOUR_VM_IP/api` (backend)
 
 **Quick Reference:**
