@@ -1,0 +1,6 @@
+rfqId,userId,source,destination,materialWeight,materialType,vehicleId,vehicle_number,status,totalCost,createdAt,approvedBy,approvedAt,rejectedAt,rejectionReason,startedAt,completedAt
+1,2,Ambica pattern,VRL (Tumkur),2000,Raw Materials,11,KA01AA1003,PENDING_APPROVAL,20000,2025-11-02T16:09:40.786Z,,,,,,
+2,1,Ambica pattern,Bright globle,1000,Raw material,15,KA01AA1007,PENDING_APPROVAL,10000,2025-11-02T17:38:50.667Z,,,,,,
+3,3,Bhagyashree,Chakrapani vyapar Private Limited,1000,Raw material,15,KA01AA1007,PENDING_APPROVAL,10000,2025-11-02T17:48:28.004Z,,,,,,
+4,3,Bhagyashree,Chakrapani vyapar Private Limited,1000,Raw material,15,KA01AA1007,PENDING_APPROVAL,10000,2025-11-02T17:48:41.656Z,,,,,,
+5,1,Bhagyashree,Bright globle,1000,Material raw,15,KA01AA1007,PENDING_APPROVAL,10000,2025-11-02T17:54:32.745Z,,,,,,

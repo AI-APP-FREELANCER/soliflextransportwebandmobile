@@ -1,0 +1,1501 @@
+const express = require('express');
+const router = express.Router();
+const csvService = require('../services/csvDatabaseService');
+
+// GET /api/orders - Get all orders
+router.get('/orders', async (req, res) => {
+  try {
+    const orders = await csvService.readOrders();
+    res.json({
+      success: true,
+      orders: orders
+    });
+  } catch (error) {
+    console.error('Get orders error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});
+
+// GET /api/orders/user/:userId - Get user's orders
+router.get('/orders/user/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const orders = await csvService.readOrders();
+    const userOrders = orders.filter(order => order.user_id === userId);
+    
+    res.json({
+      success: true,
+      orders: userOrders
+    });
+  } catch (error) {
+    console.error('Get user orders error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});
+
+// GET /api/orders/:orderId - Get single order details
+router.get('/orders/:orderId', async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const order = await csvService.getOrderById(orderId);
+    
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: 'Order not found'
+      });
+    }
+    
+    res.json({
+      success: true,
+      order: order
+    });
+  } catch (error) {
+    console.error('Get order error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});
+
+// POST /api/create-order - Create a new order
+router.post('/create-order', async (req, res) => {
+  try {
+    const {
+      userId,
+      source,
+      destination,
+      materialWeight,
+      materialType,
+      tripType = 'Single-Trip-Vendor',
+      vehicleId,
+      vehicleNumber,
+      segments, // For Multiple trip type - array of segment objects
+      invoiceAmount, // For Single/Round/Internal trips - optional manual override
+      tollCharges // For Single/Round/Internal trips - optional manual override
+    } = req.body;
+    
+    // CRITICAL FIX: Validate required fields based on trip type
+    // For Multiple Trip, materialWeight and materialType are in segments, not top-level
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required field: userId'
+      });
+    }
+    
+    // For non-Multiple Trip orders, validate materialWeight and materialType at top level
+    if (tripType !== 'Multiple-Trip-Vendor') {
+      if (!materialWeight || materialWeight <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Missing or invalid required field: materialWeight'
+        });
+      }
+      if (!materialType || materialType.trim() === '') {
+        return res.status(400).json({
+          success: false,
+          message: 'Missing required field: materialType'
+        });
+      }
+    } else {
+      // For Multiple Trip, validate segments array
+      if (!segments || !Array.isArray(segments) || segments.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Missing or empty segments array for Multiple Trip'
+        });
+      }
+      // Validate each segment has required fields
+      for (let i = 0; i < segments.length; i++) {
+        const seg = segments[i];
+        if (!seg.source || !seg.destination || !seg.material_weight || seg.material_weight <= 0 || !seg.material_type) {
+          return res.status(400).json({
+            success: false,
+            message: `Segment ${i + 1} is missing required fields: source, destination, material_weight (>0), or material_type`
+          });
+        }
+      }
+    }
+    
+    // Generate order ID
+    const orderId = await csvService.getNextOrderId();
+    
+    // Build trip_segments array based on trip type
+    let tripSegments = [];
+    let finalSource = source || '';
+    let finalDestination = destination || '';
+    // Store original trip type for audit trail (may be recategorized for factory-to-factory Round Trips)
+    let originalTripType = tripType;
+    
+    if (tripType === 'Single-Trip-Vendor') {
+      // Single Trip Vendor: 1 segment from source to destination
+      if (!source || !destination) {
+        return res.status(400).json({
+          success: false,
+          message: 'Source and destination are required for Single Trip Vendor'
+        });
+      }
+      tripSegments = [{
+        segment_id: 1,
+        source: source,
+        destination: destination,
+        material_weight: parseInt(materialWeight) || 0,
+        material_type: materialType,
+        segment_status: 'Pending',
+        invoice_amount: invoiceAmount !== undefined ? parseInt(invoiceAmount) : undefined,
+        toll_charges: tollCharges !== undefined ? parseInt(tollCharges) : undefined
+      }];
+      finalSource = source;
+      finalDestination = destination;
+    } else if (tripType === 'Round-Trip-Vendor') {
+      // Round Trip Vendor: MANDATORY two-segment creation (A->B, B->A)
+      // Part 1: Strict Validation
+      // - A (Starting Point) must be Factory
+      // - B (End Point) must be Vendor
+      // - A and B must be different
+      // Part 2: Dynamic Categorization
+      // - If both A and B are Factories, recategorize as 'Internal Transfer' but keep A->B->A segments
+      
+      if (!source || !destination) {
+        return res.status(400).json({
+          success: false,
+          message: 'Source and destination are required for Round Trip Vendor'
+        });
+      }
+      
+      const sourceLocation = source.trim();
+      const destLocation = destination.trim();
+      
+      // Validation 1: Source and Destination cannot be the same
+      if (sourceLocation.toLowerCase() === destLocation.toLowerCase()) {
+        return res.status(400).json({
+          success: false,
+          message: 'Starting Point and End Point cannot be the same location for Round Trip. Please select different locations.'
+        });
+      }
+      
+      // Validation 2: Check if both locations are factories (for recategorization)
+      const isSourceFactory = csvService.isFactoryLocation(sourceLocation);
+      const isDestFactory = csvService.isFactoryLocation(destLocation);
+      
+      // Part 2: Dynamic Trip Categorization (Internal Transfer Logic)
+      // If both A and B are Factories, recategorize as 'Internal Transfer'
+      // originalTripType already stored in outer scope for audit trail
+      if (isSourceFactory && isDestFactory) {
+        // Recategorize: Both are Factories -> Internal Transfer
+        // But still generate A->B->A segments (same structure)
+        tripType = 'Internal-Transfer';
+        console.log(`[Round Trip Recategorization] Both Starting Point (${sourceLocation}) and End Point (${destLocation}) are Factories. Recategorizing as 'Internal Transfer' but maintaining A->B->A segment structure.`);
+      } else {
+        // Part 1: Strict Validation for Round-Trip-Vendor
+        // A (Starting Point) must be Factory, B (End Point) must be Vendor
+        
+        // Validation 2a: A must be Factory for Round-Trip-Vendor
+        if (!isSourceFactory) {
+          return res.status(400).json({
+            success: false,
+            message: `Round Trip Starting Point must be a Factory location. Selected location '${sourceLocation}' is not a Factory. Please select a Factory location (IAF unit-1/2/3/4 or Soliflex unit-1/2/3/4) as the Starting Point, or use 'Single-Trip-Vendor' if starting from a Vendor.`
+          });
+        }
+        
+        // Validation 2b: B must be Vendor (not Factory) for Round-Trip-Vendor
+        if (isDestFactory) {
+          return res.status(400).json({
+            success: false,
+            message: `Round Trip End Point must be a Vendor location (not a Factory). Selected location '${destLocation}' is a Factory. Please select a Vendor location as the End Point, or use 'Internal Transfer' if the destination is a Factory.`
+          });
+        }
+        
+        // Validation passed: A is Factory, B is Vendor
+        console.log(`[Round Trip Validation] ✓ Valid Round Trip: Factory (${sourceLocation}) -> Vendor (${destLocation})`);
+      }
+      
+      // Part 3: Final Segment Structure Guarantee
+      // MANDATORY: Always generate exactly 2 segments: A->B and B->A
+      // Segment 1 (Outbound): A -> B
+      // Segment 2 (Return): B -> A
+      tripSegments = [
+        {
+          segment_id: 1,
+          source: sourceLocation, // Starting Point (A)
+          destination: destLocation, // End Point (B)
+          material_weight: parseInt(materialWeight) || 0,
+          material_type: materialType,
+          segment_status: 'Pending',
+          invoice_amount: invoiceAmount !== undefined ? parseInt(invoiceAmount) : undefined,
+          toll_charges: tollCharges !== undefined ? parseInt(tollCharges) : undefined,
+          is_manual_invoice: 'No' // Will be updated during invoice calculation
+        },
+        // Segment 2 (Return): B -> A
+        // MANDATORY: Always generate return segment to complete the round trip
+        // NON-CHARGEABLE RETURN LEG: Weight for display, but 0 invoice/toll (does not contribute to totals)
+        // Part 1: Material Weight MUST use same value as Segment 1 (for visual representation that load is still present)
+        // Part 1: Invoice Amount and Toll Charges MUST be 0 (non-chargeable return leg)
+        {
+          segment_id: 2,
+          source: destLocation, // End Point (B) becomes source for return leg
+          destination: sourceLocation, // Original Starting Point (A) is the return destination
+          material_weight: parseInt(materialWeight) || 0, // Part 1: MUST use same weight as Segment 1 (for display)
+          material_type: materialType, // Default to same material type
+          segment_status: 'Pending',
+          // Part 1: MANDATORY: Set to 0 (non-chargeable return leg - does not contribute to totals)
+          invoice_amount: 0,
+          toll_charges: 0,
+          is_manual_invoice: 'No'
+        }
+      ];
+      // For Round Trip: finalSource is starting point (A), finalDestination is also A (round trip completes)
+      // BUT: The route summary should show A → B → A, not just A → A
+      // We'll use trip_segments to derive the correct display route
+      finalSource = sourceLocation; // Starting Point (A)
+      finalDestination = sourceLocation; // Round trip always ends at original starting point (A)
+      
+      // Debug: Log segment structure for Round Trip
+      console.log(`[Round Trip] Segment structure created:`);
+      console.log(`  Segment 1: ${sourceLocation} → ${destLocation}`);
+      console.log(`  Segment 2: ${destLocation} → ${sourceLocation}`);
+      console.log(`  Final Source: ${finalSource}, Final Destination: ${finalDestination}`);
+    } else if (tripType === 'Internal-Transfer') {
+      // Internal Transfer: 1 segment from source to destination (factory locations only)
+      if (!source || !destination) {
+        return res.status(400).json({
+          success: false,
+          message: 'Source and destination are required for Internal Transfer'
+        });
+      }
+      tripSegments = [{
+        segment_id: 1,
+        source: source,
+        destination: destination,
+        material_weight: parseInt(materialWeight) || 0,
+        material_type: materialType,
+        segment_status: 'Pending',
+        invoice_amount: invoiceAmount !== undefined ? parseInt(invoiceAmount) : undefined,
+        toll_charges: tollCharges !== undefined ? parseInt(tollCharges) : undefined
+      }];
+      finalSource = source;
+      finalDestination = destination;
+    } else if (tripType === 'Multiple-Trip-Vendor') {
+      // Multiple Trip: N segments from segments array
+      if (!segments || !Array.isArray(segments) || segments.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Segments array is required for Multiple trip type'
+        });
+      }
+      // Multiple Trip: Map segments and ensure each has independent invoice/toll calculation
+      // Part 1: ALL segments can have manual invoice/toll from frontend
+      tripSegments = segments.map((seg, index) => ({
+        segment_id: index + 1,
+        source: seg.source || '',
+        destination: seg.destination || '',
+        material_weight: parseInt(seg.material_weight) || 0,
+        material_type: seg.material_type || '',
+        segment_status: 'Pending',
+        // Part 1: ALL segments can have manual invoice/toll from frontend (not just Segment 1)
+        invoice_amount: (seg.invoice_amount !== undefined && seg.invoice_amount !== null) ? parseInt(seg.invoice_amount) : undefined,
+        toll_charges: (seg.toll_charges !== undefined && seg.toll_charges !== null) ? parseInt(seg.toll_charges) : undefined,
+        is_manual_invoice: 'No' // Will be updated during calculation
+      }));
+      
+      // Set source/destination from first/last segment
+      finalSource = segments[0].source || '';
+      finalDestination = segments[segments.length - 1].destination || '';
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid trip type. Must be Single-Trip-Vendor, Round-Trip-Vendor, Multiple-Trip-Vendor, or Internal-Transfer'
+      });
+    }
+    
+    // Calculate invoice_amount and toll_charges for each segment
+    // CRITICAL: Each segment must be calculated independently based on its own source and weight
+    for (let i = 0; i < tripSegments.length; i++) {
+      const segment = tripSegments[i];
+      
+      // Part 1 Fix: For Round Trip Segment 2, skip rate card calculation (already set to 0)
+      // Segment 2 must remain 0 weight and 0 invoice for initial creation
+      if (i === 1 && (tripType === 'Round-Trip-Vendor' || originalTripType === 'Round-Trip-Vendor')) {
+        // Segment 2 is already initialized with 0 values - skip rate card calculation
+        console.log(`[Round Trip Segment 2] Skipping rate card calculation - kept at 0 weight and 0 invoice`);
+        continue; // Skip to next segment
+      }
+      
+      // Part 1: For Multiple Trip, ALL segments can have manual invoice/toll from frontend
+      // For Round Trip, only Segment 1 can have manual override
+      const providedInvoice = (tripType === 'Multiple-Trip-Vendor') 
+        ? segment.invoice_amount  // Multiple Trip: All segments can have manual override
+        : ((i === 0) ? segment.invoice_amount : undefined); // Round Trip: Only Segment 1
+      const providedToll = (tripType === 'Multiple-Trip-Vendor')
+        ? segment.toll_charges  // Multiple Trip: All segments can have manual override
+        : ((i === 0) ? segment.toll_charges : undefined); // Round Trip: Only Segment 1
+      
+      // Part 1: For Round Trip only, ensure Segment 2+ starts with undefined
+      if (i > 0 && (tripType === 'Round-Trip-Vendor' || originalTripType === 'Round-Trip-Vendor')) {
+        // Round Trip Segment 2+ handled separately
+      } else if (i > 0 && tripType !== 'Multiple-Trip-Vendor') {
+        // For other trip types (not Round Trip, not Multiple Trip), reset Segment 2+
+        segment.invoice_amount = undefined;
+        segment.toll_charges = undefined;
+      }
+      
+      try {
+        // Part 1: For Multiple Trip, use segment-specific calculation (checks both source and destination)
+        // For other trip types, use source-only calculation (backward compatible)
+        let rateResult;
+        if (tripType === 'Multiple-Trip-Vendor') {
+          // Multiple Trip: USER REQUEST - Always use Drop rates for all segments
+          rateResult = await csvService.calculateInvoiceRate(
+            segment.source, // Source location
+            segment.material_weight, // Material weight
+            segment.destination, // Destination location
+            tripType // Pass tripType to force Drop rates
+          );
+        } else {
+          // Single/Round/Internal: Use source-only calculation (backward compatible)
+          rateResult = await csvService.calculateInvoiceRate(
+            segment.source, // Use segment's own source
+            segment.material_weight // Use segment's own weight
+          );
+        }
+        
+        // Check if frontend provided manual values that differ from calculated
+        if (providedInvoice !== undefined && providedInvoice !== null && 
+            parseInt(providedInvoice) !== rateResult.invoice_amount) {
+          segment.invoice_amount = parseInt(providedInvoice);
+          segment.is_manual_invoice = 'Yes';
+        } else {
+          // Auto-calculated value
+          segment.invoice_amount = rateResult.invoice_amount;
+          segment.is_manual_invoice = (providedInvoice !== undefined && providedInvoice !== null) ? 'Yes' : 'No';
+        }
+        
+        // Check if frontend provided manual toll values
+        if (providedToll !== undefined && providedToll !== null &&
+            parseInt(providedToll) !== rateResult.toll_charges) {
+          segment.toll_charges = parseInt(providedToll);
+          if (segment.is_manual_invoice !== 'Yes') {
+            segment.is_manual_invoice = 'Yes';
+          }
+        } else {
+          // Auto-calculated toll charges
+          segment.toll_charges = rateResult.toll_charges;
+          if (segment.is_manual_invoice !== 'Yes' && providedToll === undefined) {
+            segment.is_manual_invoice = 'No';
+          }
+        }
+        
+        // Debug logging for Segment 1 (already calculated above)
+        if (i === 0 && (tripType === 'Round-Trip-Vendor' || originalTripType === 'Round-Trip-Vendor')) {
+          console.log(`[Round Trip Segment 1] Calculated:`);
+          console.log(`  Source: ${segment.source} (Factory location)`);
+          console.log(`  Destination: ${segment.destination} (Vendor location)`);
+          console.log(`  Weight: ${segment.material_weight} kg (User input)`);
+          console.log(`  Invoice: ₹${segment.invoice_amount} (User input or calculated)`);
+          console.log(`  Segment 2 will remain at 0 weight and 0 invoice`);
+        }
+      } catch (error) {
+        console.error(`Error calculating invoice rate for segment ${i + 1}:`, error);
+        // Set defaults if calculation fails
+        if (i === 0 && providedInvoice !== undefined) {
+          segment.invoice_amount = parseInt(providedInvoice);
+        } else {
+          segment.invoice_amount = 0; // Default for Segment 2+ or if calculation fails
+        }
+        
+        if (i === 0 && providedToll !== undefined) {
+          segment.toll_charges = parseInt(providedToll);
+        } else {
+          segment.toll_charges = 0; // Default for Segment 2+ or if calculation fails
+        }
+        
+        segment.is_manual_invoice = (i === 0 && (providedInvoice !== undefined || providedToll !== undefined)) ? 'Yes' : 'No';
+      }
+    }
+    
+    // Calculate order totals (ONCE) - sums only chargeable segments' weights, invoice amounts, and toll charges
+    // For Round Trip: Only Segment 1 contributes (Segment 2 is non-chargeable)
+    // CRITICAL: This calculation happens only once during order creation to prevent double-counting
+    const totals = csvService.calculateOrderTotals(tripSegments, tripType);
+    
+    // Validation: Ensure Round Trip (or recategorized Internal Transfer from Round Trip) has exactly 2 segments in correct A->B->A structure
+    // Note: Recategorized Internal Transfer from Round Trip will have tripType='Internal-Transfer' but should still have 2 segments
+    if (tripType === 'Round-Trip-Vendor' || originalTripType === 'Round-Trip-Vendor') {
+      if (tripSegments.length !== 2) {
+        console.error(`[Round Trip Validation] Expected 2 segments, found: ${tripSegments.length}`);
+        console.error(`[Round Trip Validation] Segments:`, JSON.stringify(tripSegments, null, 2));
+        return res.status(400).json({
+          success: false,
+          message: `Round Trip must have exactly 2 segments. Found: ${tripSegments.length}. Please ensure the backend correctly generated both outbound (A->B) and return (B->A) segments.`
+        });
+      }
+      
+      // Verify Round Trip structure: A->B (segment 1), B->A (segment 2)
+      const segment1 = tripSegments[0];
+      const segment2 = tripSegments[1];
+      
+      // Validation: Segment 1 destination must equal Segment 2 source (A->B->A continuity)
+      if (segment1.destination !== segment2.source) {
+        console.error(`[Round Trip Validation] Segment continuity error:`);
+        console.error(`  Segment 1: ${segment1.source} -> ${segment1.destination}`);
+        console.error(`  Segment 2: ${segment2.source} -> ${segment2.destination}`);
+        return res.status(400).json({
+          success: false,
+          message: `Round Trip segment structure invalid: Segment 1 destination (${segment1.destination}) must equal Segment 2 source (${segment2.source}) to form a valid A->B->A route.`
+        });
+      }
+      
+      // Validation: Segment 2 destination must equal Segment 1 source (completes the round trip)
+      if (segment2.destination !== segment1.source) {
+        console.error(`[Round Trip Validation] Return destination error:`);
+        console.error(`  Segment 1: ${segment1.source} -> ${segment1.destination}`);
+        console.error(`  Segment 2: ${segment2.source} -> ${segment2.destination}`);
+        return res.status(400).json({
+          success: false,
+          message: `Round Trip return segment invalid: Segment 2 destination (${segment2.destination}) must equal Segment 1 source (${segment1.source}) to complete the round trip back to the starting point.`
+        });
+      }
+      
+      console.log(`[Round Trip Validation] ✓ Valid Round Trip structure:`);
+      console.log(`  Segment 1 (Outbound): ${segment1.source} -> ${segment1.destination}`);
+      console.log(`  Segment 2 (Return): ${segment2.source} -> ${segment2.destination}`);
+    }
+    
+    // Assign truck (update vehicle status to 'Booked')
+    if (vehicleId) {
+      try {
+        await csvService.updateVehicleStatus(vehicleId, 'Booked');
+      } catch (error) {
+        console.error('Error updating vehicle status:', error);
+        return res.status(400).json({
+          success: false,
+          message: `Failed to assign vehicle: ${error.message}`
+        });
+      }
+    }
+    
+    // Calculate order category based on trip segments
+    const orderCategory = csvService.calculateOrderCategory(tripSegments);
+    
+    // Get user's department for creator_department field
+    let creatorDepartment = '';
+    try {
+      const user = await csvService.getUserById(userId.toString());
+      if (user && user.department) {
+        creatorDepartment = user.department;
+      }
+    } catch (error) {
+      console.error('Error fetching user department:', error);
+      // Continue without department if lookup fails
+    }
+    
+    // CRITICAL FIX: For Multiple Trip, calculate materialWeight and materialType from segments
+    let finalMaterialWeight = materialWeight || 0;
+    let finalMaterialType = materialType || '';
+    
+    if (tripType === 'Multiple-Trip-Vendor') {
+      // Calculate total weight from segments
+      finalMaterialWeight = tripSegments.reduce((sum, seg) => sum + (parseInt(seg.material_weight) || 0), 0);
+      
+      // Consolidate material types from all segments
+      const allMaterialTypes = new Set();
+      for (const seg of tripSegments) {
+        try {
+          const segMaterialType = seg.material_type || '';
+          if (segMaterialType.trim() !== '') {
+            // Try to parse as JSON array
+            try {
+              const parsed = JSON.parse(segMaterialType);
+              if (Array.isArray(parsed)) {
+                parsed.forEach(type => allMaterialTypes.add(type.toString()));
+              } else {
+                allMaterialTypes.add(segMaterialType);
+              }
+            } catch (e) {
+              // If not JSON, treat as single string
+              allMaterialTypes.add(segMaterialType);
+            }
+          }
+        } catch (e) {
+          console.error(`Error parsing material_type for segment:`, e);
+        }
+      }
+      finalMaterialType = JSON.stringify(Array.from(allMaterialTypes));
+      
+      console.log(`[Multiple Trip] Calculated totals:`);
+      console.log(`  Total Weight: ${finalMaterialWeight} kg`);
+      console.log(`  Material Types: ${finalMaterialType}`);
+    }
+    
+    // Create order object
+    // CRITICAL FIX: Ensure all fields have defaults (null safety)
+    // CRITICAL FIX: Add creator tracking fields (creatorUserId, creatorDepartment)
+    const order = {
+      order_id: orderId,
+      user_id: userId.toString(),
+      source: finalSource || '',
+      destination: finalDestination || '',
+      material_weight: finalMaterialWeight.toString(),
+      material_type: finalMaterialType || '[]', // CRITICAL FIX: Ensure not null/empty
+      trip_type: tripType,
+      vehicle_id: vehicleId ? vehicleId.toString() : '',
+      vehicle_number: vehicleNumber || '',
+      order_status: 'Open',
+      created_at: new Date().toISOString(),
+      creator_department: creatorDepartment || '',
+      creator_user_id: userId.toString(), // CRITICAL FIX: Track creator user ID
+      trip_segments: tripSegments, // Will be stringified in writeOrder
+      is_amended: 'No',
+      original_trip_type: originalTripType || tripType, // Preserve original selection if recategorized
+      order_category: orderCategory || 'Client/Vendor Order',
+      total_weight: (totals.total_weight || 0).toString(), // CRITICAL FIX: Ensure not null
+      total_invoice_amount: (totals.total_invoice_amount || 0).toString(), // CRITICAL FIX: Ensure not null
+      total_toll_charges: (totals.total_toll_charges || 0).toString() // CRITICAL FIX: Ensure not null
+    };
+    
+    // CRITICAL FIX: Log final order payload before saving
+    console.log(`[Create Order] Final Order Payload:`);
+    console.log(`  Order ID: ${order.order_id}`);
+    console.log(`  Trip Type: ${order.trip_type}`);
+    console.log(`  Material Weight: ${order.material_weight} kg`);
+    console.log(`  Material Type: ${order.material_type}`);
+    console.log(`  Total Weight: ${order.total_weight} kg`);
+    console.log(`  Total Invoice: ₹${order.total_invoice_amount}`);
+    console.log(`  Total Toll: ₹${order.total_toll_charges}`);
+    console.log(`  Vehicle ID: ${order.vehicle_id || 'N/A'}`);
+    console.log(`  Vehicle Number: ${order.vehicle_number || 'N/A'}`);
+    console.log(`  Segments Count: ${tripSegments.length}`);
+    
+    // Save order
+    await csvService.writeOrder(order);
+    
+    res.json({
+      success: true,
+      message: 'Order created successfully',
+      order: {
+        ...order,
+        trip_segments: tripSegments // Return as array, not string
+      }
+    });
+  } catch (error) {
+    console.error('Create order error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});
+
+// POST /api/update-order-status - Update order status
+router.post('/update-order-status', async (req, res) => {
+  try {
+    const { orderId, newStatus } = req.body;
+    
+    if (!orderId || !newStatus) {
+      return res.status(400).json({
+        success: false,
+        message: 'Order ID and new status are required'
+      });
+    }
+    
+    // Update order status (truck freeing is handled automatically in updateOrderStatus)
+    const updatedOrder = await csvService.updateOrderStatus(orderId, newStatus);
+    
+    // If status changed to 'En-Route', automatically initialize workflow
+    if (newStatus === 'En-Route') {
+      try {
+        // Parse segments to check if workflow needs initialization
+        let segments = [];
+        if (updatedOrder.trip_segments && updatedOrder.trip_segments.trim() !== '') {
+          try {
+            segments = JSON.parse(updatedOrder.trip_segments);
+          } catch (e) {
+            console.error('Error parsing segments for workflow initialization:', e);
+          }
+        }
+        
+        // Check if any segment needs workflow initialization
+        let needsInitialization = false;
+        for (const segment of segments) {
+          if (!segment.workflow || !Array.isArray(segment.workflow) || segment.workflow.length === 0) {
+            needsInitialization = true;
+            break;
+          }
+        }
+        
+        if (needsInitialization) {
+          // Initialize workflow directly
+          for (let i = 0; i < segments.length; i++) {
+            const segment = segments[i];
+            if (!segment.workflow || !Array.isArray(segment.workflow) || segment.workflow.length === 0) {
+              const location = segment.destination || segment.source || '';
+              segment.workflow = csvService.initializeSegmentWorkflow(segment, location);
+            }
+          }
+          
+          // Update order with initialized workflow
+          const orderWithWorkflow = {
+            ...updatedOrder,
+            trip_segments: segments
+          };
+          
+          // Save order with workflow
+          await csvService.writeOrder(orderWithWorkflow);
+          console.log(`Workflow initialized for order ${orderId}`);
+        }
+      } catch (error) {
+        console.error('Error initializing workflow on status change:', error);
+        // Don't fail the status update if workflow initialization fails
+      }
+    }
+    
+    res.json({
+      success: true,
+      message: 'Order status updated successfully',
+      order: updatedOrder
+    });
+  } catch (error) {
+    console.error('Update order status error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Internal server error'
+    });
+  }
+});
+
+// POST /api/calculate-invoice-rate - Calculate invoice amount and toll charges
+// USER REQUEST: For Multiple Trip, ALWAYS use Drop rates (dropped_by_vendor_*) for all segments
+router.post('/calculate-invoice-rate', async (req, res) => {
+  try {
+    const { source_location, material_weight, destination_location, trip_type } = req.body;
+    
+    if (!source_location || source_location.trim() === '') {
+      return res.status(400).json({
+        success: false,
+        message: 'Source location is required'
+      });
+    }
+    
+    if (material_weight === undefined || material_weight === null) {
+      return res.status(400).json({
+        success: false,
+        message: 'Material weight is required'
+      });
+    }
+    
+    const weight = parseInt(material_weight);
+    if (isNaN(weight) || weight < 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Material weight must be a positive number (>= 0)'
+      });
+    }
+    
+    try {
+      // USER REQUEST: If trip_type is 'Multiple-Trip-Vendor', force Drop rates for all segments
+      // Otherwise, use segment-specific Pick/Drop logic based on source/destination
+      // For frontend preview calls, trip_type is now passed from the frontend
+      const result = await csvService.calculateInvoiceRate(
+        source_location, 
+        weight,
+        destination_location || null, // Pass destination if provided
+        trip_type || null // USER REQUEST: Pass trip_type to force Drop rates for Multiple Trip
+      );
+      
+      res.json({
+        success: true,
+        invoice_amount: result.invoice_amount,
+        toll_charges: result.toll_charges
+      });
+    } catch (error) {
+      console.error('Calculate invoice rate error:', error);
+      res.status(400).json({
+        success: false,
+        message: error.message || 'Failed to calculate invoice rate'
+      });
+    }
+  } catch (error) {
+    console.error('Calculate invoice rate endpoint error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});
+
+// POST /api/amend-order - Amend an existing order by adding new segments
+router.post('/amend-order', async (req, res) => {
+  try {
+    const { orderId, newSegments, userId } = req.body;
+    
+    if (!orderId || !newSegments || !Array.isArray(newSegments) || newSegments.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Order ID and newSegments array are required'
+      });
+    }
+    
+    // Get user information for audit trail
+    let amendmentRequestedBy = '';
+    let amendmentRequestedDepartment = '';
+    if (userId) {
+      try {
+        const user = await csvService.getUserById(userId.toString());
+        if (user) {
+          amendmentRequestedBy = user.full_name || user.fullName || '';
+          amendmentRequestedDepartment = user.department || '';
+        }
+      } catch (error) {
+        console.error('Error fetching user for amendment audit trail:', error);
+      }
+    }
+    
+    // Get existing order
+    const order = await csvService.getOrderById(orderId);
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: 'Order not found'
+      });
+    }
+    
+    // Parse existing trip_segments
+    let existingSegments = [];
+    try {
+      if (order.trip_segments && order.trip_segments.trim() !== '') {
+        existingSegments = JSON.parse(order.trip_segments);
+      }
+    } catch (error) {
+      console.error('Error parsing existing segments:', error);
+      existingSegments = [];
+    }
+    
+    // Determine if this is a Round Trip order
+    const isRoundTrip = order.original_trip_type === 'Round-Trip-Vendor' || order.trip_type === 'Round-Trip-Vendor';
+    // Get the original starting point from the first segment (unchanged)
+    const originalStartingPoint = existingSegments.length > 0 
+      ? existingSegments[0].source 
+      : order.source;
+    
+    // For Round Trip: Validate that exactly ONE new segment is provided (B → C)
+    if (isRoundTrip && (!Array.isArray(newSegments) || newSegments.length !== 1)) {
+      console.log(`[Round Trip Amendment] Validation failed:`);
+      console.log(`  Expected: 1 segment`);
+      console.log(`  Received: ${Array.isArray(newSegments) ? newSegments.length : 'not an array'}`);
+      return res.status(400).json({
+        success: false,
+        message: `Round Trip amendments require exactly one additional route (B → C). Please provide a single segment. Received: ${Array.isArray(newSegments) ? newSegments.length : 'not an array'} segments.`
+      });
+    }
+    
+    // Find highest segment_id
+    let maxSegmentId = 0;
+    if (existingSegments.length > 0) {
+      maxSegmentId = Math.max(...existingSegments.map(s => parseInt(s.segment_id) || 0));
+    }
+    
+    // Add new segments with sequential IDs
+    const segmentsToAdd = newSegments.map((seg, index) => ({
+      segment_id: maxSegmentId + index + 1,
+      source: seg.source || '',
+      destination: seg.destination || '',
+      material_weight: parseInt(seg.material_weight) || 0,
+      material_type: seg.material_type || '',
+      segment_status: 'Pending',
+      invoice_amount: seg.invoice_amount !== undefined ? parseInt(seg.invoice_amount) : undefined,
+      toll_charges: seg.toll_charges !== undefined ? parseInt(seg.toll_charges) : undefined,
+      is_manual_invoice: seg.is_manual_invoice || 'No'
+    }));
+    
+    // For Round Trip: Validate that the new segment's source matches the outbound segment's destination (B)
+    if (isRoundTrip && existingSegments.length >= 2) {
+      // For Round Trip: Segment 1 is A → B (outbound), Segment 2 is B → A (return)
+      // The new segment should start from B (destination of segment 1)
+      const outboundSegment = existingSegments[0]; // Segment 1: A → B
+      const newSegmentSource = segmentsToAdd[0].source;
+      
+      console.log(`[Round Trip Amendment] Source validation:`);
+      console.log(`  Existing segments: ${existingSegments.length}`);
+      console.log(`  Segment 1 (A → B): ${existingSegments[0].source} → ${existingSegments[0].destination}`);
+      console.log(`  Segment 2 (B → A): ${existingSegments[1].source} → ${existingSegments[1].destination}`);
+      console.log(`  Expected source (B): ${outboundSegment.destination}`);
+      console.log(`  Received source: ${newSegmentSource}`);
+      
+      if (outboundSegment.destination !== newSegmentSource) {
+        return res.status(400).json({
+          success: false,
+          message: `Round Trip amendment error: New segment must start from location B (${outboundSegment.destination}), but received ${newSegmentSource}. Please ensure the source matches the destination of the outbound segment (A → B).`
+        });
+      }
+      
+      console.log(`[Round Trip Amendment] ✓ Source validation passed`);
+      console.log(`[Round Trip Amendment] Validating single segment insertion:`);
+      console.log(`  Existing route: ${existingSegments[0].source} → ${existingSegments[0].destination} → ${existingSegments[1].destination}`);
+      console.log(`  New segment: ${segmentsToAdd[0].source} → ${segmentsToAdd[0].destination}`);
+      console.log(`  Expected result: ${existingSegments[0].source} → ${existingSegments[0].destination} → ${segmentsToAdd[0].destination} → ${originalStartingPoint}`);
+    }
+    
+    // Calculate invoice_amount and toll_charges for new segments
+    // Part 2: Multiple Trip Amendment - Use segment-specific Pick/Drop logic
+    // For Round Trip: Use drop rates (source is vendor)
+    // For Multiple Trip: Use segment-specific calculation (checks both source and destination)
+    const isMultipleTrip = order.trip_type === 'Multiple-Trip-Vendor' || order.original_trip_type === 'Multiple-Trip-Vendor';
+    
+    for (let i = 0; i < segmentsToAdd.length; i++) {
+      const segment = segmentsToAdd[i];
+      const providedInvoice = segment.invoice_amount;
+      const providedToll = segment.toll_charges;
+      
+      try {
+        // Part 2: For Multiple Trip, use segment-specific calculation (checks both source and destination)
+        // For Round Trip, use source-only calculation (backward compatible)
+        let rateResult;
+        if (isMultipleTrip) {
+          // Multiple Trip: USER REQUEST - Always use Drop rates for all segments
+          rateResult = await csvService.calculateInvoiceRate(
+            segment.source, // Source location
+            segment.material_weight, // Material weight
+            segment.destination, // Destination location
+            order.trip_type || order.original_trip_type // Pass tripType to force Drop rates
+          );
+        } else {
+          // Round Trip: Use drop rates (source is vendor)
+          rateResult = await csvService.calculateInvoiceRate(
+            segment.source, // Vendor location (source for drop rates)
+            segment.material_weight // Weight from amendment modal input
+          );
+        }
+        
+        console.log(`[Amendment Segment ${i + 1}] Calculated using drop rates:`);
+        console.log(`  Source: ${segment.source} (Vendor - uses dropped_by_vendor rates)`);
+        console.log(`  Weight: ${segment.material_weight} kg`);
+        console.log(`  Invoice: ₹${rateResult.invoice_amount}`);
+        console.log(`  Toll: ₹${rateResult.toll_charges}`);
+        
+        // If frontend provided values that differ from calculated, mark as manual override
+        if (providedInvoice !== undefined && providedInvoice !== null &&
+            providedInvoice !== rateResult.invoice_amount) {
+          segment.invoice_amount = providedInvoice;
+          segment.is_manual_invoice = 'Yes';
+        } else {
+          segment.invoice_amount = rateResult.invoice_amount;
+          if (segment.is_manual_invoice !== 'Yes') {
+            segment.is_manual_invoice = 'No';
+          }
+        }
+        
+        if (providedToll !== undefined && providedToll !== null &&
+            providedToll !== rateResult.toll_charges) {
+          segment.toll_charges = providedToll;
+          if (segment.is_manual_invoice !== 'Yes') {
+            segment.is_manual_invoice = 'Yes';
+          }
+        } else {
+          segment.toll_charges = rateResult.toll_charges;
+          if (segment.is_manual_invoice !== 'Yes') {
+            segment.is_manual_invoice = 'No';
+          }
+        }
+      } catch (error) {
+        console.error(`Error calculating invoice rate for new segment ${i + 1}:`, error);
+        segment.invoice_amount = providedInvoice !== undefined ? providedInvoice : 0;
+        segment.toll_charges = providedToll !== undefined ? providedToll : 0;
+        segment.is_manual_invoice = (providedInvoice !== undefined || providedToll !== undefined) ? 'Yes' : 'No';
+      }
+    }
+    
+    let updatedSegments = [];
+    
+    if (isRoundTrip) {
+      // For Round Trip: Transform A → B → A into A → B → C → A
+      // Part 1: Retrieve Segments - existingSegments contains [A→B, B→A]
+      // Part 2: Define New Segment #2 (B → C) - segmentsToAdd[0] contains B → C
+      // Part 3: Update Final Segment #3 (C → A) - update B → A to C → A with 0 weight/invoice
+      
+      // Find the return segment (the one that returns to original starting point)
+      let returnSegmentIndex = -1;
+      for (let i = existingSegments.length - 1; i >= 0; i--) {
+        if (existingSegments[i].destination === originalStartingPoint) {
+          returnSegmentIndex = i;
+          break;
+        }
+      }
+      
+      if (returnSegmentIndex >= 0) {
+        // Found return segment: Insert new segment BEFORE the return segment
+        // Part 2: Round Trip Amendment Logic (A → B → C → A)
+        
+        // Part 1: Retrieve Segments - Preserve segment 1 (A → B) - unchanged, contributes to totals
+        const segmentsBeforeReturn = existingSegments.slice(0, returnSegmentIndex);
+        const originalSegment1 = segmentsBeforeReturn[0]; // Segment 1: A → B (chargeable)
+        
+        // Part 2: Define New Segment #2 (B → C) - Display Only
+        // MUST carry original Segment 1's weight/invoice/toll for display, but NOT contribute to totals
+        const newSegmentBtoC = segmentsToAdd[0]; // From amendment modal: B → C
+        const displayOnlySegment = {
+          segment_id: maxSegmentId + 1, // Sequential ID after Segment 1
+          source: newSegmentBtoC.source, // B (from amendment modal)
+          destination: newSegmentBtoC.destination, // C (from amendment modal)
+          material_weight: originalSegment1.material_weight, // Part 2: MUST use original Segment 1 weight (for display)
+          material_type: originalSegment1.material_type || newSegmentBtoC.material_type || '', // Use original or new
+          segment_status: 'Pending',
+          invoice_amount: originalSegment1.invoice_amount || 0, // Part 2: MUST use original Segment 1 invoice (for display)
+          toll_charges: originalSegment1.toll_charges || 0, // Part 2: MUST use original Segment 1 toll (for display)
+          is_manual_invoice: 'No' // Display-only segment
+        };
+        
+        // Part 3: Define New Segment #3 (C → A) - New Chargeable Leg
+        // MUST use amendment weight/invoice/toll and contribute to totals
+        const truckCurrentLocation = newSegmentBtoC.destination; // C (destination of Segment 2)
+        const chargeableReturnSegment = {
+          segment_id: maxSegmentId + 2, // Sequential ID after Segment 2
+          source: truckCurrentLocation, // C (truck's current location after amendment)
+          destination: originalStartingPoint, // A (original starting point)
+          material_weight: parseInt(newSegmentBtoC.material_weight) || 0, // Part 2: Use weight from amendment modal
+          material_type: newSegmentBtoC.material_type || originalSegment1.material_type || '', // Use amendment or original
+          segment_status: 'Pending',
+          invoice_amount: parseInt(newSegmentBtoC.invoice_amount) || 0, // Part 2: Use invoice from amendment modal (calculated)
+          toll_charges: parseInt(newSegmentBtoC.toll_charges) || 0, // Part 2: Use toll from amendment modal
+          is_manual_invoice: newSegmentBtoC.is_manual_invoice || 'No'
+        };
+        
+        // Part 4: Rebuild Array - Final structure: [Segment #1 (A → B), Segment #2 (B → C) display-only, Segment #3 (C → A) chargeable]
+        updatedSegments = [...segmentsBeforeReturn, displayOnlySegment, chargeableReturnSegment];
+        
+        console.log(`[Round Trip Amendment] Transforming route:`);
+        console.log(`  Original route: ${originalSegment1.source} → ${originalSegment1.destination} → ${originalStartingPoint}`);
+        console.log(`  Segment 1 (A → B): Unchanged, contributes to totals`);
+        console.log(`  Segment 2 (B → C): Display only - Weight: ${displayOnlySegment.material_weight} kg (original), Invoice: ₹${displayOnlySegment.invoice_amount} (original), NOT in totals`);
+        console.log(`  Segment 3 (C → A): Chargeable - Weight: ${chargeableReturnSegment.material_weight} kg (amendment), Invoice: ₹${chargeableReturnSegment.invoice_amount} (amendment), IN totals`);
+        console.log(`  Final route: ${originalSegment1.source} → ${originalSegment1.destination} → ${truckCurrentLocation} → ${originalStartingPoint}`);
+        
+        console.log(`[Round Trip Amendment] Final segment array:`);
+        updatedSegments.forEach((seg, idx) => {
+          const contribution = (idx === 0 || idx === 2) ? 'CONTRIBUTES' : 'DISPLAY ONLY';
+          console.log(`  Segment #${idx + 1} (ID: ${seg.segment_id}): ${seg.source} → ${seg.destination} (${seg.material_weight} kg, ₹${seg.invoice_amount}) [${contribution}]`);
+        });
+      } else {
+        // No return segment found (shouldn't happen for Round Trip, but handle gracefully)
+        // Append new segments and add return segment at end
+        updatedSegments = [...existingSegments, ...segmentsToAdd];
+        const lastSegment = updatedSegments[updatedSegments.length - 1];
+        if (lastSegment.destination !== originalStartingPoint) {
+          // MANDATORY: Create new return segment with 0 weight and 0 invoice
+          console.log(`[Round Trip Amendment] Creating new return segment with 0 weight and 0 invoice`);
+          console.log(`  Return route: ${lastSegment.destination} → ${originalStartingPoint}`);
+          
+          updatedSegments.push({
+            segment_id: maxSegmentId + segmentsToAdd.length + 1,
+            source: lastSegment.destination,
+            destination: originalStartingPoint,
+            material_weight: 0, // MANDATORY: Always 0
+            material_type: lastSegment.material_type || '',
+            segment_status: 'Pending',
+            invoice_amount: 0, // MANDATORY: Always 0
+            toll_charges: 0, // MANDATORY: Always 0
+            is_manual_invoice: 'No'
+          });
+        }
+      }
+    } else {
+      // Part 2: For Multiple Trip: Simply append new segments (no complex manipulation)
+      // All segments contribute to totals - simple addition
+      updatedSegments = [...existingSegments, ...segmentsToAdd];
+      
+      // Part 2: For Multiple Trip amendments, log the simple addition
+      if (isMultipleTrip) {
+        console.log(`[Multiple Trip Amendment] Adding ${segmentsToAdd.length} new segment(s):`);
+        segmentsToAdd.forEach((seg, idx) => {
+          console.log(`  New Segment #${existingSegments.length + idx + 1} (ID: ${seg.segment_id}): ${seg.source} → ${seg.destination} (${seg.material_weight} kg, ₹${seg.invoice_amount}) - CONTRIBUTES to totals`);
+        });
+        console.log(`  Total segments after amendment: ${updatedSegments.length}`);
+      }
+    }
+    
+    // Calculate original totals (before amendment) for comparison in approval summary
+    // Use original trip type for accurate calculation
+    const orderTripType = order.original_trip_type || order.trip_type || 'Single-Trip-Vendor';
+    const originalTotals = csvService.calculateOrderTotals(existingSegments, orderTripType);
+    
+    // Recalculate order category after amendment
+    const orderCategory = csvService.calculateOrderCategory(updatedSegments);
+    
+    // Recalculate totals with updated segments (projected totals after approval)
+    // For Round Trip: Only Segment 1 and final segment contribute (middle segments are display-only)
+    const projectedTotals = csvService.calculateOrderTotals(updatedSegments, orderTripType);
+    
+    // Determine final destination based on trip type
+    let finalDestination = updatedSegments[updatedSegments.length - 1]?.destination || order.destination || '';
+    if (order.original_trip_type === 'Round-Trip-Vendor' || order.trip_type === 'Round-Trip-Vendor') {
+      // Round trips always end at original starting point
+      finalDestination = updatedSegments[0]?.source || order.source || '';
+    }
+    
+    // Store original segment count for identifying new segments in approval modal
+    const originalSegmentCount = existingSegments.length;
+    
+    // Initialize workflow for new segments if order is En-Route
+    if (order.order_status === 'En-Route') {
+      for (let i = originalSegmentCount; i < updatedSegments.length; i++) {
+        const segment = updatedSegments[i];
+        if (!segment.workflow || !Array.isArray(segment.workflow) || segment.workflow.length === 0) {
+          const location = segment.destination || segment.source || '';
+          segment.workflow = csvService.initializeSegmentWorkflow(segment, location);
+          // New segments start with SECURITY_ENTRY_PENDING
+          segment.segment_status = 'SECURITY_ENTRY_PENDING';
+        }
+      }
+    }
+    
+    // Update order: set status to 'Open', mark as amended, add audit trail
+    // CRITICAL FIX: Add lastAmendedByUserId and lastAmendedTimestamp for tracking
+    const now = new Date().toISOString();
+    const updatedOrder = {
+      ...order,
+      trip_segments: updatedSegments,
+      order_status: 'Open', // Reset to Open requiring re-approval
+      is_amended: 'Yes',
+      order_category: orderCategory, // Recalculate category
+      total_weight: projectedTotals.total_weight.toString(),
+      total_invoice_amount: projectedTotals.total_invoice_amount.toString(),
+      total_toll_charges: projectedTotals.total_toll_charges.toString(),
+      // Store original totals for approval summary comparison
+      original_total_weight: originalTotals.total_weight.toString(),
+      original_total_invoice_amount: originalTotals.total_invoice_amount.toString(),
+      original_total_toll_charges: originalTotals.total_toll_charges.toString(),
+      original_segment_count: originalSegmentCount.toString(),
+      // Audit trail fields for amendment
+      amendment_requested_by: amendmentRequestedBy || '',
+      amendment_requested_department: amendmentRequestedDepartment || '',
+      amendment_requested_at: now,
+      // CRITICAL FIX: Track last amendment user and timestamp
+      last_amended_by_user_id: userId ? userId.toString() : '',
+      last_amended_timestamp: now,
+      // Keep original_trip_type unchanged
+      // Update source/destination from first/last segment
+      source: updatedSegments[0]?.source || order.source || '',
+      destination: finalDestination
+    };
+    
+    // Save updated order
+    await csvService.writeOrder(updatedOrder);
+    
+    res.json({
+      success: true,
+      message: 'Order amended successfully. Status reset to Open for re-approval.',
+      order: {
+        ...updatedOrder,
+        trip_segments: updatedSegments // Return as array
+      }
+    });
+  } catch (error) {
+    console.error('Amend order error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Internal server error'
+    });
+  }
+});
+
+// POST /api/initialize-workflow - Initialize workflow for an order
+router.post('/initialize-workflow', async (req, res) => {
+  try {
+    const { orderId } = req.body;
+    
+    if (!orderId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Order ID is required'
+      });
+    }
+    
+    // Get order
+    const order = await csvService.getOrderById(orderId);
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: 'Order not found'
+      });
+    }
+    
+    // Parse trip_segments
+    let segments = [];
+    try {
+      if (order.trip_segments && order.trip_segments.trim() !== '') {
+        segments = JSON.parse(order.trip_segments);
+      }
+    } catch (error) {
+      console.error('Error parsing segments:', error);
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid trip segments format'
+      });
+    }
+    
+    // Initialize workflow for each segment
+    for (let i = 0; i < segments.length; i++) {
+      const segment = segments[i];
+      
+      // Only initialize if workflow doesn't exist or is empty
+      if (!segment.workflow || !Array.isArray(segment.workflow) || segment.workflow.length === 0) {
+        // Determine location (use destination for most stages, source for entry)
+        const location = segment.destination || segment.source || '';
+        segment.workflow = csvService.initializeSegmentWorkflow(segment, location);
+        
+        // For first segment, set first stage status based on order status
+        if (i === 0 && order.order_status === 'En-Route') {
+          // First segment's SECURITY_ENTRY is active
+          if (segment.workflow[0]) {
+            segment.workflow[0].status = 'PENDING';
+          }
+        }
+      }
+    }
+    
+    // Update order with workflow-initialized segments
+    const updatedOrder = {
+      ...order,
+      trip_segments: segments
+    };
+    
+    // Save order
+    await csvService.writeOrder(updatedOrder);
+    
+    res.json({
+      success: true,
+      message: 'Workflow initialized successfully',
+      order: {
+        ...updatedOrder,
+        trip_segments: segments
+      }
+    });
+  } catch (error) {
+    console.error('Initialize workflow error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Internal server error'
+    });
+  }
+});
+
+// POST /api/workflow-action - Perform workflow action (approve/reject/revoke/cancel)
+router.post('/workflow-action', async (req, res) => {
+  try {
+    const { orderId, segmentId, stage, action, userId, comments } = req.body;
+    
+    if (!orderId || !segmentId || !stage || !action || !userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Order ID, Segment ID, Stage, Action, and User ID are required'
+      });
+    }
+    
+    // Get user information
+    let userDepartment = '';
+    let userRole = '';
+    let userName = '';
+    try {
+      const user = await csvService.getUserById(userId.toString());
+      if (user) {
+        userDepartment = user.department || '';
+        userRole = csvService.getRoleByDepartment(userDepartment) || '';
+        userName = user.full_name || user.fullName || '';
+      }
+    } catch (error) {
+      console.error('Error fetching user:', error);
+    }
+    
+    // Get order
+    const order = await csvService.getOrderById(orderId);
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: 'Order not found'
+      });
+    }
+    
+    // Parse trip_segments
+    let segments = [];
+    try {
+      if (order.trip_segments && order.trip_segments.trim() !== '') {
+        segments = JSON.parse(order.trip_segments);
+      }
+    } catch (error) {
+      console.error('Error parsing segments:', error);
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid trip segments format'
+      });
+    }
+    
+    // Find segment
+    const segmentIndex = segments.findIndex(s => parseInt(s.segment_id) === parseInt(segmentId));
+    if (segmentIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        message: 'Segment not found'
+      });
+    }
+    
+    const segment = segments[segmentIndex];
+    
+    // Parse workflow steps
+    let workflowSteps = [];
+    if (segment.workflow) {
+      if (Array.isArray(segment.workflow)) {
+        workflowSteps = segment.workflow;
+      } else if (typeof segment.workflow === 'string') {
+        try {
+          workflowSteps = JSON.parse(segment.workflow);
+        } catch (e) {
+          workflowSteps = [];
+        }
+      }
+    }
+    
+    // Validate action
+    if (action === 'REJECT' && (!comments || comments.trim() === '')) {
+      return res.status(400).json({
+        success: false,
+        message: 'Comments are required for rejection'
+      });
+    }
+    
+    // Check if user can perform action
+    if (!csvService.canPerformWorkflowAction(userDepartment, userRole, stage, action)) {
+      return res.status(403).json({
+        success: false,
+        message: 'User does not have permission to perform this action'
+      });
+    }
+    
+    // Find workflow step
+    const stepIndex = workflowSteps.findIndex(ws => ws.stage === stage);
+    if (stepIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        message: 'Workflow step not found'
+      });
+    }
+    
+    const workflowStep = workflowSteps[stepIndex];
+    
+    // Handle CANCEL action
+    if (action === 'CANCEL') {
+      // CRITICAL FIX: Record complete audit trail for cancellation
+      const cancelTimestamp = Date.now();
+      const cancelDateTime = new Date().toISOString();
+      
+      // Update order status to CANCELED
+      order.order_status = 'CANCELED';
+      
+      // Add CANCELED workflow step
+      workflowStep.status = 'CANCELED';
+      workflowStep.approved_by = userName || 'Unknown';
+      workflowStep.department = userDepartment || 'Unknown';
+      workflowStep.timestamp = cancelTimestamp;
+      workflowStep.comments = comments || 'Order canceled';
+      workflowStep.location = segment.destination || segment.source || '';
+      
+      // CRITICAL FIX: Log audit trail
+      console.log(`[Workflow Audit] CANCELLED - Stage: ${stage}, Order: ${orderId}, Segment: ${segmentId}`);
+      console.log(`  Cancelled By: ${userName}`);
+      console.log(`  Canceller Department: ${userDepartment}`);
+      console.log(`  Date/Time: ${cancelDateTime}`);
+      console.log(`  Cancellation Reason: ${comments || 'Not provided'}`);
+      
+      // Update segment status
+      segment.segment_status = 'CANCELED';
+      
+      // Save order
+      await csvService.writeOrder(order);
+      
+      return res.json({
+        success: true,
+        message: 'Order canceled successfully',
+        order: {
+          ...order,
+          trip_segments: segments
+        }
+      });
+    }
+    
+    // Handle REVOKE action
+    if (action === 'REVOKE') {
+      if (workflowStep.status !== 'REJECTED') {
+        return res.status(400).json({
+          success: false,
+          message: 'Can only revoke rejected stages'
+        });
+      }
+      
+      // CRITICAL FIX: Record complete audit trail for revocation
+      const revokeTimestamp = Date.now();
+      const revokeDateTime = new Date().toISOString();
+      
+      // Reset to PENDING
+      workflowStep.status = 'PENDING';
+      workflowStep.approved_by = userName || 'Unknown'; // Keep who revoked for audit
+      workflowStep.department = userDepartment || 'Unknown'; // Keep department for audit
+      workflowStep.timestamp = revokeTimestamp;
+      workflowStep.comments = comments || 'Rejection revoked';
+      workflowStep.location = segment.destination || segment.source || '';
+      
+      // CRITICAL FIX: Log audit trail
+      console.log(`[Workflow Audit] REVOKED - Stage: ${stage}, Order: ${orderId}, Segment: ${segmentId}`);
+      console.log(`  Revoked By: ${userName}`);
+      console.log(`  Revoker Department: ${userDepartment}`);
+      console.log(`  Date/Time: ${revokeDateTime}`);
+      console.log(`  Revocation Reason: ${comments || 'Not provided'}`);
+      
+      // Update segment status based on stage
+      if (stage === 'SECURITY_ENTRY') {
+        segment.segment_status = 'SECURITY_ENTRY_PENDING';
+      } else if (stage === 'STORES_VERIFICATION') {
+        segment.segment_status = 'STORES_VERIFICATION_PENDING';
+      } else if (stage === 'SECURITY_EXIT') {
+        segment.segment_status = 'SECURITY_EXIT_PENDING';
+      }
+    }
+    
+    // CRITICAL FIX: Record complete audit trail for all workflow actions
+    const auditTimestamp = Date.now();
+    const auditDateTime = new Date().toISOString();
+    
+    // CRITICAL FIX: Ensure all audit fields are properly set
+    // Handle APPROVE action
+    if (action === 'APPROVE') {
+      workflowStep.status = 'APPROVED';
+      workflowStep.approved_by = userName || 'Unknown';
+      workflowStep.department = userDepartment || 'Unknown';
+      workflowStep.timestamp = auditTimestamp;
+      workflowStep.comments = comments || '';
+      workflowStep.location = segment.destination || segment.source || '';
+      
+      // CRITICAL FIX: Log audit trail
+      console.log(`[Workflow Audit] APPROVED - Stage: ${stage}, Order: ${orderId}, Segment: ${segmentId}`);
+      console.log(`  Approver Name: ${userName}`);
+      console.log(`  Approver Department: ${userDepartment}`);
+      console.log(`  Date/Time: ${auditDateTime}`);
+      console.log(`  Comments: ${comments || 'None'}`);
+      
+      // Update segment status based on progression
+      if (stage === 'SECURITY_ENTRY') {
+        segment.segment_status = 'STORES_VERIFICATION_PENDING';
+      } else if (stage === 'STORES_VERIFICATION') {
+        segment.segment_status = 'SECURITY_EXIT_PENDING';
+      } else if (stage === 'SECURITY_EXIT') {
+        segment.segment_status = 'COMPLETED';
+        
+        // Activate next segment's SECURITY_ENTRY if exists
+        if (segmentIndex + 1 < segments.length) {
+          const nextSegment = segments[segmentIndex + 1];
+          let nextWorkflowSteps = [];
+          if (nextSegment.workflow) {
+            if (Array.isArray(nextSegment.workflow)) {
+              nextWorkflowSteps = nextSegment.workflow;
+            } else if (typeof nextSegment.workflow === 'string') {
+              try {
+                nextWorkflowSteps = JSON.parse(nextSegment.workflow);
+              } catch (e) {
+                nextWorkflowSteps = [];
+              }
+            }
+          }
+          
+          // Initialize workflow if not exists
+          if (nextWorkflowSteps.length === 0) {
+            const location = nextSegment.destination || nextSegment.source || '';
+            nextWorkflowSteps = csvService.initializeSegmentWorkflow(nextSegment, location);
+            nextSegment.workflow = nextWorkflowSteps;
+          }
+          
+          // Activate SECURITY_ENTRY
+          const nextSecurityEntry = nextWorkflowSteps.find(ws => ws.stage === 'SECURITY_ENTRY');
+          if (nextSecurityEntry) {
+            nextSecurityEntry.status = 'PENDING';
+            nextSegment.segment_status = 'SECURITY_ENTRY_PENDING';
+          }
+        }
+      }
+    }
+    
+    // Handle REJECT action
+    if (action === 'REJECT') {
+      workflowStep.status = 'REJECTED';
+      workflowStep.approved_by = userName || 'Unknown';
+      workflowStep.department = userDepartment || 'Unknown';
+      workflowStep.timestamp = auditTimestamp;
+      workflowStep.comments = comments || 'Rejection reason not provided';
+      workflowStep.location = segment.destination || segment.source || '';
+      
+      // CRITICAL FIX: Log audit trail
+      console.log(`[Workflow Audit] REJECTED - Stage: ${stage}, Order: ${orderId}, Segment: ${segmentId}`);
+      console.log(`  Rejector Name: ${userName}`);
+      console.log(`  Rejector Department: ${userDepartment}`);
+      console.log(`  Date/Time: ${auditDateTime}`);
+      console.log(`  Rejection Reason: ${comments || 'Not provided'}`);
+      
+      // Update segment status
+      if (stage === 'SECURITY_ENTRY') {
+        segment.segment_status = 'SECURITY_ENTRY_REJECTED';
+      } else if (stage === 'STORES_VERIFICATION') {
+        segment.segment_status = 'STORES_VERIFICATION_REJECTED';
+      } else if (stage === 'SECURITY_EXIT') {
+        segment.segment_status = 'SECURITY_EXIT_REJECTED';
+      }
+    }
+    
+    // Update workflow step
+    workflowSteps[stepIndex] = workflowStep;
+    segment.workflow = workflowSteps;
+    segments[segmentIndex] = segment;
+    
+    // CRITICAL FIX: Check if order workflow is completed or rejected and update order status
+    const isOrderRejected = csvService.isOrderRejected(order, segments);
+    const isOrderCompleted = csvService.isOrderCompleted(order, segments);
+    
+    if (isOrderRejected && order.order_status !== 'REJECTED' && order.order_status !== 'CANCELLED' && order.order_status !== 'CANCELED') {
+      console.log(`[Workflow Status Update] Order ${orderId} workflow is REJECTED - updating order status to REJECTED`);
+      order.order_status = 'REJECTED';
+    } else if (isOrderCompleted && order.order_status !== 'COMPLETED' && order.order_status !== 'REJECTED' && order.order_status !== 'CANCELLED' && order.order_status !== 'CANCELED') {
+      console.log(`[Workflow Status Update] Order ${orderId} workflow is COMPLETED - updating order status to COMPLETED`);
+      order.order_status = 'COMPLETED';
+    }
+    
+    // Update order
+    const updatedOrder = {
+      ...order,
+      trip_segments: segments
+    };
+    
+    // Save order
+    await csvService.writeOrder(updatedOrder);
+    
+    res.json({
+      success: true,
+      message: `Workflow action ${action} performed successfully`,
+      order: {
+        ...updatedOrder,
+        trip_segments: segments
+      }
+    });
+  } catch (error) {
+    console.error('Workflow action error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Internal server error'
+    });
+  }
+});
+
+module.exports = router;
+
