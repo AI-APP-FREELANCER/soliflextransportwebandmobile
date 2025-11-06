@@ -1,17 +1,32 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import '../models/user_model.dart';
 import '../models/vendor_model.dart';
 import '../models/vehicle_model.dart';
 import '../models/rfq_model.dart';
 import '../models/order_model.dart';
 
+// Conditional import for web
+import 'dart:html' as html if (dart.library.html) 'dart:html';
+
 class ApiService {
-  // For web, use localhost. For mobile/emulator, adjust if needed:
-  // - Android Emulator: http://10.0.2.2:3000/api
-  // - iOS Simulator: http://localhost:3000/api
-  // - Physical Device: Use your computer's IP address, e.g., http://192.168.1.100:3000/api
-  static const String baseUrl = 'http://localhost:3000/api';
+  // Dynamically determine base URL based on platform
+  // For web: Use current hostname (works for both localhost and VM IP)
+  // For mobile: Use localhost or configured IP
+  static String get baseUrl {
+    if (kIsWeb) {
+      // For web, use the current hostname and port 3000
+      final hostname = html.window.location.hostname;
+      return 'http://$hostname:3000/api';
+    } else {
+      // For mobile/emulator, use localhost or configured IP
+      // - Android Emulator: http://10.0.2.2:3000/api
+      // - iOS Simulator: http://localhost:3000/api
+      // - Physical Device: Use your computer's IP address, e.g., http://192.168.1.100:3000/api
+      return 'http://localhost:3000/api';
+    }
+  }
 
   // Register a new user
   Future<Map<String, dynamic>> register({
