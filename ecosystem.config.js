@@ -21,7 +21,7 @@ module.exports = {
     {
       name: 'soliflex-frontend',
       script: 'npx',
-      args: 'http-server build/web -p 4000 -c-1 --cors',
+      args: 'http-server build/web -p 8081 -c-1 --cors',
       cwd: process.cwd(),
       instances: 1,
       exec_mode: 'fork',

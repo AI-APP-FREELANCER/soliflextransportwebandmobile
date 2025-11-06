@@ -1,4 +1,4 @@
-# Azure NSG Port Configuration - Ports 3000 and 4000
+# Azure NSG Port Configuration - Ports 3000 and 8081
 
 ## Prerequisites
 - Azure CLI installed (`az --version` to check)
@@ -57,18 +57,18 @@ az network nsg rule create \
   --description "Allow inbound traffic on port 3000 for backend API"
 ```
 
-### Step 5: Create Inbound Rule for Port 4000
+### Step 5: Create Inbound Rule for Port 8081
 ```bash
 az network nsg rule create \
   --resource-group $RESOURCE_GROUP \
   --nsg-name $NSG_NAME \
-  --name Allow-Inbound-Port-4000 \
+  --name Allow-Inbound-Port-8081 \
   --priority 1001 \
   --direction Inbound \
   --access Allow \
   --protocol Tcp \
-  --destination-port-ranges 4000 \
-  --description "Allow inbound traffic on port 4000 for frontend web app"
+  --destination-port-ranges 8081 \
+  --description "Allow inbound traffic on port 8081 for frontend web app"
 ```
 
 ### Step 6: Create Outbound Rule for Port 3000 (if needed)
@@ -85,18 +85,18 @@ az network nsg rule create \
   --description "Allow outbound traffic on port 3000"
 ```
 
-### Step 7: Create Outbound Rule for Port 4000 (if needed)
+### Step 7: Create Outbound Rule for Port 8081 (if needed)
 ```bash
 az network nsg rule create \
   --resource-group $RESOURCE_GROUP \
   --nsg-name $NSG_NAME \
-  --name Allow-Outbound-Port-4000 \
+  --name Allow-Outbound-Port-8081 \
   --priority 1003 \
   --direction Outbound \
   --access Allow \
   --protocol Tcp \
-  --destination-port-ranges 4000 \
-  --description "Allow outbound traffic on port 4000"
+  --destination-port-ranges 8081 \
+  --description "Allow outbound traffic on port 8081"
 ```
 
 ### Step 8: Verify Rules Created
@@ -141,16 +141,16 @@ az network nsg rule create \
   --protocol Tcp \
   --destination-port-ranges 3000
 
-# Port 4000 Inbound
+# Port 8081 Inbound
 az network nsg rule create \
   --resource-group $RESOURCE_GROUP \
   --nsg-name $NSG_NAME \
-  --name Allow-Inbound-Port-4000 \
+  --name Allow-Inbound-Port-8081 \
   --priority 1001 \
   --direction Inbound \
   --access Allow \
   --protocol Tcp \
-  --destination-port-ranges 4000
+  --destination-port-ranges 8081
 ```
 
 ### Create Outbound Rules
@@ -166,16 +166,16 @@ az network nsg rule create \
   --protocol Tcp \
   --destination-port-ranges 3000
 
-# Port 4000 Outbound
+# Port 8081 Outbound
 az network nsg rule create \
   --resource-group $RESOURCE_GROUP \
   --nsg-name $NSG_NAME \
-  --name Allow-Outbound-Port-4000 \
+  --name Allow-Outbound-Port-8081 \
   --priority 1003 \
   --direction Outbound \
   --access Allow \
   --protocol Tcp \
-  --destination-port-ranges 4000
+  --destination-port-ranges 8081
 ```
 
 ---
@@ -212,12 +212,12 @@ Add-AzNetworkSecurityRuleConfig `
   -DestinationAddressPrefix * `
   -DestinationPortRange 3000
 
-# Port 4000 Inbound
+# Port 8081 Inbound
 Add-AzNetworkSecurityRuleConfig `
   -ResourceGroupName $ResourceGroupName `
   -NetworkSecurityGroupName $NsgName `
-  -Name "Allow-Inbound-Port-4000" `
-  -Description "Allow inbound traffic on port 4000 for frontend web app" `
+  -Name "Allow-Inbound-Port-8081" `
+  -Description "Allow inbound traffic on port 8081 for frontend web app" `
   -Access Allow `
   -Protocol Tcp `
   -Direction Inbound `
@@ -225,7 +225,7 @@ Add-AzNetworkSecurityRuleConfig `
   -SourceAddressPrefix * `
   -SourcePortRange * `
   -DestinationAddressPrefix * `
-  -DestinationPortRange 4000
+  -DestinationPortRange 8081
 ```
 
 ### Step 4: Create Outbound Rules
@@ -245,12 +245,12 @@ Add-AzNetworkSecurityRuleConfig `
   -DestinationAddressPrefix * `
   -DestinationPortRange 3000
 
-# Port 4000 Outbound
+# Port 8081 Outbound
 Add-AzNetworkSecurityRuleConfig `
   -ResourceGroupName $ResourceGroupName `
   -NetworkSecurityGroupName $NsgName `
-  -Name "Allow-Outbound-Port-4000" `
-  -Description "Allow outbound traffic on port 4000" `
+  -Name "Allow-Outbound-Port-8081" `
+  -Description "Allow outbound traffic on port 8081" `
   -Access Allow `
   -Protocol Tcp `
   -Direction Outbound `
@@ -258,7 +258,7 @@ Add-AzNetworkSecurityRuleConfig `
   -SourceAddressPrefix * `
   -SourcePortRange * `
   -DestinationAddressPrefix * `
-  -DestinationPortRange 4000
+  -DestinationPortRange 8081
 ```
 
 ### Step 5: Save NSG Configuration
