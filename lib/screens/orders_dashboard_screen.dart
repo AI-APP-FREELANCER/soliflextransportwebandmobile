@@ -11,6 +11,7 @@ import '../services/api_service.dart';
 import '../services/order_workflow_service.dart';
 import '../utils/permission_utils.dart';
 import '../theme/app_theme.dart';
+import '../widgets/notification_badge.dart';
 import 'amendment_modal.dart';
 import 'approval_summary_modal.dart';
 import 'workflow_screen.dart';
@@ -255,6 +256,7 @@ class _OrdersDashboardScreenState extends State<OrdersDashboardScreen> {
         backgroundColor: AppTheme.darkSurface,
         foregroundColor: AppTheme.textPrimary,
         actions: [
+          const NotificationBadge(),
           IconButton(
             icon: const Icon(Icons.home),
             tooltip: 'Home',
@@ -532,7 +534,40 @@ class _OrdersDashboardScreenState extends State<OrdersDashboardScreen> {
               
               const SizedBox(height: 2),
               
-              // Line 2: Vehicle Number | Vehicle Type | Capacity %
+              // Line 2: Member Name | Department Name
+              Row(
+                children: [
+                  Icon(Icons.person, size: 9, color: AppTheme.textSecondary),
+                  const SizedBox(width: 2),
+                  Expanded(
+                    child: Text(
+                      'Member: ${order.creatorName ?? 'N/A'}',
+                      style: const TextStyle(
+                        fontSize: 9,
+                        color: AppTheme.textPrimary,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      'Dept: ${order.creatorDepartment ?? 'N/A'}',
+                      style: const TextStyle(
+                        fontSize: 9,
+                        color: AppTheme.textSecondary,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
+                    ),
+                  ),
+                ],
+              ),
+              
+              const SizedBox(height: 2),
+              
+              // Line 3: Vehicle Number | Vehicle Type | Capacity %
               Row(
                 children: [
                   if (order.vehicleNumber != null && order.vehicleNumber!.isNotEmpty) ...[
@@ -605,7 +640,7 @@ class _OrdersDashboardScreenState extends State<OrdersDashboardScreen> {
               
               const SizedBox(height: 2),
               
-              // Line 3: Route: Starting Point → End Point
+              // Line 4: Route: Starting Point → End Point
               Row(
                 children: [
                   Icon(Icons.route, size: 9, color: AppTheme.textSecondary),
@@ -912,6 +947,11 @@ class OrderDetailModal extends StatelessWidget {
     return '${date.day}/${date.month}/${date.year} ${date.hour}:${date.minute.toString().padLeft(2, '0')}';
   }
 
+  String _formatAuditTimestamp(DateTime? date) {
+    if (date == null) return 'N/A';
+    return '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year} ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}:${date.second.toString().padLeft(2, '0')}';
+  }
+
   Widget _buildTotalRow(String label, String value, IconData icon, [Color? valueColor]) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -999,9 +1039,12 @@ class OrderDetailModal extends StatelessWidget {
 
   Future<void> _updateOrderStatus(BuildContext context, String newStatus) async {
     final orderProvider = Provider.of<OrderProvider>(context, listen: false);
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final userId = authProvider.user?.userId;
     final result = await orderProvider.updateOrderStatus(
       orderId: order.orderId,
       newStatus: newStatus,
+      userId: userId,
     );
 
     if (context.mounted) {
@@ -1066,6 +1109,8 @@ class OrderDetailModal extends StatelessWidget {
                 Divider(color: AppTheme.darkBorder),
                 const SizedBox(height: 12), // Reduced from 16
                 _buildDetailRow('Order ID', order.orderId),
+                _buildDetailRow('Member Name', order.creatorName ?? 'N/A'),
+                _buildDetailRow('Department', order.creatorDepartment ?? 'N/A'),
                 // For Round Trip: Display route summary instead of simple Source → Destination
                 if (order.tripType == 'Round-Trip-Vendor' || order.originalTripType == 'Round-Trip-Vendor') ...[
                   if (order.tripSegments.length >= 2) ...[
@@ -1279,13 +1324,93 @@ class OrderDetailModal extends StatelessWidget {
                     children: [
                       _buildTotalRow('Total Weight', '${order.getTotalWeight()} kg', Icons.scale),
                       const Divider(height: 12), // Reduced from 20
-                      _buildTotalRow('Total Invoice', '₹${order.getTotalInvoiceAmount()}', Icons.attach_money, Colors.green),
+                      _buildTotalRow('Freight Charges', '₹${order.getTotalInvoiceAmount()}', Icons.attach_money, Colors.green),
                       const Divider(height: 12), // Reduced from 20
                       _buildTotalRow('Total Toll', '₹${order.getTotalTollCharges()}', Icons.local_atm, Colors.blue),
                     ],
                   ),
                 ),
-                const SizedBox(height: 10), // Reduced from 16
+                const SizedBox(height: 16),
+                // Order Lifecycle Audit Trail Section
+                const Text(
+                  'Order Lifecycle Audit Trail',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                    color: AppTheme.primaryOrange,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppTheme.darkSurface,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: AppTheme.darkBorder, width: 1),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Initial Creation Section
+                      _buildAuditSection(
+                        'Initial Creation',
+                        [
+                          _buildAuditRow('Created Timestamp', _formatAuditTimestamp(order.createdAt)),
+                          _buildAuditRow('Created By Member', order.creatorName ?? 'N/A'),
+                          _buildAuditRow('Created By Department', order.creatorDepartment ?? 'N/A'),
+                        ],
+                      ),
+                      const Divider(height: 20, color: AppTheme.darkBorder),
+                      // Approval Stage Section
+                      _buildAuditSection(
+                        'Approval Stage',
+                        [
+                          _buildAuditRow('Approved Timestamp', order.approvedTimestamp != null ? _formatAuditTimestamp(order.approvedTimestamp) : 'Not yet approved'),
+                          _buildAuditRow('Approved By Member', order.approvedByMember ?? 'N/A'),
+                          _buildAuditRow('Approved By Department', order.approvedByDepartment ?? 'N/A'),
+                        ],
+                      ),
+                      const Divider(height: 20, color: AppTheme.darkBorder),
+                      // Vehicle/Facility Execution Section
+                      _buildAuditSection(
+                        'Vehicle/Facility Execution',
+                        [
+                          _buildAuditRow('Vehicle Started At', order.vehicleStartedAtTimestamp != null ? _formatAuditTimestamp(order.vehicleStartedAtTimestamp) : 'Not started'),
+                          _buildAuditRow('Started From Location', order.vehicleStartedFromLocation ?? 'N/A'),
+                        ],
+                      ),
+                      const Divider(height: 20, color: AppTheme.darkBorder),
+                      // Entry/Security Checkpoint Section
+                      _buildAuditSection(
+                        'Entry/Security Checkpoint',
+                        [
+                          _buildAuditRow('Security Entry Timestamp', order.securityEntryTimestamp != null ? _formatAuditTimestamp(order.securityEntryTimestamp) : 'Not recorded'),
+                          _buildAuditRow('Security Guard Member', order.securityEntryMemberName ?? 'N/A'),
+                          _buildAuditRow('Checkpoint Location', order.securityEntryCheckpointLocation ?? 'N/A'),
+                        ],
+                      ),
+                      const Divider(height: 20, color: AppTheme.darkBorder),
+                      // Stores/Validation Section
+                      _buildAuditSection(
+                        'Stores/Validation',
+                        [
+                          _buildAuditRow('Stores Validation Timestamp', order.storesValidationTimestamp != null ? _formatAuditTimestamp(order.storesValidationTimestamp) : 'Not completed'),
+                        ],
+                      ),
+                      const Divider(height: 20, color: AppTheme.darkBorder),
+                      // Exit/Completion Section
+                      _buildAuditSection(
+                        'Exit/Completion',
+                        [
+                          _buildAuditRow('Vehicle Exited Timestamp', order.vehicleExitedTimestamp != null ? _formatAuditTimestamp(order.vehicleExitedTimestamp) : 'Not completed'),
+                          _buildAuditRow('Exit Approved By Timestamp', order.exitApprovedByTimestamp != null ? _formatAuditTimestamp(order.exitApprovedByTimestamp) : 'N/A'),
+                          _buildAuditRow('Exit Approved By Member', order.exitApprovedByMemberName ?? 'N/A'),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
                 Container(
                   padding: const EdgeInsets.all(10), // Reduced from 12
                   decoration: BoxDecoration(
@@ -1428,6 +1553,55 @@ class OrderDetailModal extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildAuditSection(String title, List<Widget> children) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: const TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 14,
+            color: AppTheme.primaryOrange,
+          ),
+        ),
+        const SizedBox(height: 8),
+        ...children,
+      ],
+    );
+  }
+
+  Widget _buildAuditRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 180,
+            child: Text(
+              label,
+              style: const TextStyle(
+                fontSize: 12,
+                color: AppTheme.textSecondary,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(
+                fontSize: 12,
+                color: AppTheme.textPrimary,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

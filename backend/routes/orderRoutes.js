@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const csvService = require('../services/csvDatabaseService');
+const notificationService = require('../services/notificationService');
 
 // GET /api/orders - Get all orders
 router.get('/orders', async (req, res) => {
@@ -485,16 +486,22 @@ router.post('/create-order', async (req, res) => {
     // Calculate order category based on trip segments
     const orderCategory = csvService.calculateOrderCategory(tripSegments);
     
-    // Get user's department for creator_department field
+    // Get user's department and full name for creator tracking fields
     let creatorDepartment = '';
+    let creatorName = '';
     try {
       const user = await csvService.getUserById(userId.toString());
-      if (user && user.department) {
-        creatorDepartment = user.department;
+      if (user) {
+        if (user.department) {
+          creatorDepartment = user.department;
+        }
+        if (user.fullName) {
+          creatorName = user.fullName;
+        }
       }
     } catch (error) {
-      console.error('Error fetching user department:', error);
-      // Continue without department if lookup fails
+      console.error('Error fetching user data:', error);
+      // Continue without user data if lookup fails
     }
     
     // CRITICAL FIX: For Multiple Trip, calculate materialWeight and materialType from segments
@@ -552,6 +559,7 @@ router.post('/create-order', async (req, res) => {
       created_at: new Date().toISOString(),
       creator_department: creatorDepartment || '',
       creator_user_id: userId.toString(), // CRITICAL FIX: Track creator user ID
+      creator_name: creatorName || '', // Track creator's full name
       trip_segments: tripSegments, // Will be stringified in writeOrder
       is_amended: 'No',
       original_trip_type: originalTripType || tripType, // Preserve original selection if recategorized
@@ -560,6 +568,21 @@ router.post('/create-order', async (req, res) => {
       total_invoice_amount: (totals.total_invoice_amount || 0).toString(), // CRITICAL FIX: Ensure not null
       total_toll_charges: (totals.total_toll_charges || 0).toString() // CRITICAL FIX: Ensure not null
     };
+    
+    // CRITICAL FIX: Initialize workflow for ALL segments when order is created
+    // This ensures workflows are available immediately, not just when status changes to En-Route
+    for (let i = 0; i < tripSegments.length; i++) {
+      const segment = tripSegments[i];
+      // Initialize workflow if it doesn't exist
+      if (!segment.workflow || !Array.isArray(segment.workflow) || segment.workflow.length === 0) {
+        const location = segment.destination || segment.source || '';
+        segment.workflow = csvService.initializeSegmentWorkflow(segment, location);
+        console.log(`[Create Order] Initialized workflow for Segment ${i + 1} (${segment.source} → ${segment.destination})`);
+      }
+    }
+    
+    // Update order with segments that now have workflows
+    order.trip_segments = tripSegments;
     
     // CRITICAL FIX: Log final order payload before saving
     console.log(`[Create Order] Final Order Payload:`);
@@ -573,9 +596,18 @@ router.post('/create-order', async (req, res) => {
     console.log(`  Vehicle ID: ${order.vehicle_id || 'N/A'}`);
     console.log(`  Vehicle Number: ${order.vehicle_number || 'N/A'}`);
     console.log(`  Segments Count: ${tripSegments.length}`);
+    console.log(`  Workflows Initialized: ${tripSegments.every(seg => seg.workflow && Array.isArray(seg.workflow) && seg.workflow.length > 0)}`);
     
     // Save order
     await csvService.writeOrder(order);
+    
+    // Create notifications for new order
+    try {
+      await notificationService.notifyNewOrder(order);
+    } catch (notificationError) {
+      console.error('Error creating notifications for new order:', notificationError);
+      // Continue even if notification creation fails
+    }
     
     res.json({
       success: true,
@@ -597,7 +629,7 @@ router.post('/create-order', async (req, res) => {
 // POST /api/update-order-status - Update order status
 router.post('/update-order-status', async (req, res) => {
   try {
-    const { orderId, newStatus } = req.body;
+    const { orderId, newStatus, userId } = req.body;
     
     if (!orderId || !newStatus) {
       return res.status(400).json({
@@ -606,8 +638,47 @@ router.post('/update-order-status', async (req, res) => {
       });
     }
     
+    // Get order before update to check previous status
+    const orderBeforeUpdate = await csvService.getOrderById(orderId);
+    const previousStatus = orderBeforeUpdate ? orderBeforeUpdate.order_status : '';
+    
+    // Prepare update data with audit fields
+    const updateData = {};
+    
+    // Capture approval stage data when status changes from Open to In-Progress or En-Route
+    if ((newStatus === 'In-Progress' || newStatus === 'En-Route') && 
+        (previousStatus === 'Open' || previousStatus === '')) {
+      // Capture approval timestamp
+      updateData.approved_timestamp = new Date().toISOString();
+      
+      // Capture approval user information if userId is provided
+      if (userId) {
+        try {
+          const user = await csvService.getUserById(userId.toString());
+          if (user) {
+            updateData.approved_by_member = user.fullName || user.full_name || '';
+            updateData.approved_by_department = user.department || '';
+          }
+        } catch (error) {
+          console.error('Error fetching user for approval audit:', error);
+          // Continue without user data if lookup fails
+        }
+      }
+    }
+    
     // Update order status (truck freeing is handled automatically in updateOrderStatus)
-    const updatedOrder = await csvService.updateOrderStatus(orderId, newStatus);
+    const updatedOrder = await csvService.updateOrderStatus(orderId, newStatus, updateData);
+    
+    // Create notifications when order is approved (status changes to In-Progress or En-Route)
+    if ((newStatus === 'In-Progress' || newStatus === 'En-Route') && 
+        (previousStatus === 'Open' || previousStatus === '')) {
+      try {
+        await notificationService.notifyApprovedOrder(updatedOrder);
+      } catch (notificationError) {
+        console.error('Error creating notifications for approved order:', notificationError);
+        // Continue even if notification creation fails
+      }
+    }
     
     // If status changed to 'En-Route', automatically initialize workflow
     if (newStatus === 'En-Route') {
@@ -1387,6 +1458,84 @@ router.post('/workflow-action', async (req, res) => {
       console.log(`  Date/Time: ${auditDateTime}`);
       console.log(`  Comments: ${comments || 'None'}`);
       
+      // Capture audit fields based on workflow stage
+      // Check if this is the first SECURITY_ENTRY approval across all segments
+      if (stage === 'SECURITY_ENTRY') {
+        let isFirstSecurityEntry = true;
+        for (let i = 0; i < segments.length; i++) {
+          const seg = segments[i];
+          let segWorkflowSteps = [];
+          if (seg.workflow) {
+            if (Array.isArray(seg.workflow)) {
+              segWorkflowSteps = seg.workflow;
+            } else if (typeof seg.workflow === 'string') {
+              try {
+                segWorkflowSteps = JSON.parse(seg.workflow);
+              } catch (e) {
+                segWorkflowSteps = [];
+              }
+            }
+          }
+          const securityEntryStep = segWorkflowSteps.find(ws => ws.stage === 'SECURITY_ENTRY');
+          // Check if any previous segment has an approved SECURITY_ENTRY
+          if (i < segmentIndex && securityEntryStep && securityEntryStep.status === 'APPROVED') {
+            isFirstSecurityEntry = false;
+            break;
+          }
+        }
+        
+        // Capture Vehicle/Facility Execution and Entry/Security Checkpoint data
+        if (isFirstSecurityEntry) {
+          order.vehicle_started_at_timestamp = auditDateTime;
+          order.vehicle_started_from_location = segment.source || workflowStep.location || '';
+          order.security_entry_timestamp = auditDateTime;
+          order.security_entry_member_name = userName || '';
+          order.security_entry_checkpoint_location = workflowStep.location || segment.source || '';
+          console.log(`[Audit] Captured Vehicle Start and Security Entry for order ${orderId}`);
+        }
+      }
+      
+      // Capture Stores/Validation Checkpoint data (first STORES_VERIFICATION approval)
+      if (stage === 'STORES_VERIFICATION') {
+        let isFirstStoresVerification = true;
+        for (let i = 0; i < segments.length; i++) {
+          const seg = segments[i];
+          let segWorkflowSteps = [];
+          if (seg.workflow) {
+            if (Array.isArray(seg.workflow)) {
+              segWorkflowSteps = seg.workflow;
+            } else if (typeof seg.workflow === 'string') {
+              try {
+                segWorkflowSteps = JSON.parse(seg.workflow);
+              } catch (e) {
+                segWorkflowSteps = [];
+              }
+            }
+          }
+          const storesStep = segWorkflowSteps.find(ws => ws.stage === 'STORES_VERIFICATION');
+          if (i < segmentIndex && storesStep && storesStep.status === 'APPROVED') {
+            isFirstStoresVerification = false;
+            break;
+          }
+        }
+        
+        if (isFirstStoresVerification) {
+          order.stores_validation_timestamp = auditDateTime;
+          console.log(`[Audit] Captured Stores Validation for order ${orderId}`);
+        }
+      }
+      
+      // Capture Exit/Completion data (last SECURITY_EXIT approval - last segment, last stage)
+      if (stage === 'SECURITY_EXIT') {
+        const isLastSegment = segmentIndex === segments.length - 1;
+        if (isLastSegment) {
+          order.vehicle_exited_timestamp = auditDateTime;
+          order.exit_approved_by_timestamp = auditDateTime;
+          order.exit_approved_by_member_name = userName || '';
+          console.log(`[Audit] Captured Vehicle Exit and Completion for order ${orderId}`);
+        }
+      }
+      
       // Update segment status based on progression
       if (stage === 'SECURITY_ENTRY') {
         segment.segment_status = 'STORES_VERIFICATION_PENDING';
@@ -1471,7 +1620,7 @@ router.post('/workflow-action', async (req, res) => {
       order.order_status = 'COMPLETED';
     }
     
-    // Update order
+    // Update order - order object already has audit fields updated above
     const updatedOrder = {
       ...order,
       trip_segments: segments
@@ -1493,6 +1642,92 @@ router.post('/workflow-action', async (req, res) => {
     res.status(500).json({
       success: false,
       message: error.message || 'Internal server error'
+    });
+  }
+});
+
+// GET /api/notifications/department/:department - Get notifications for a department
+router.get('/notifications/department/:department', async (req, res) => {
+  try {
+    const { department } = req.params;
+    const notifications = await csvService.getNotificationsByDepartment(department);
+    
+    res.json({
+      success: true,
+      notifications: notifications
+    });
+  } catch (error) {
+    console.error('Get notifications error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});
+
+// GET /api/notifications/user/:userId - Get notifications for user's department
+router.get('/notifications/user/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const user = await csvService.getUserById(userId);
+    
+    if (!user || !user.department) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found or department not set'
+      });
+    }
+    
+    const notifications = await csvService.getNotificationsByDepartment(user.department);
+    
+    res.json({
+      success: true,
+      notifications: notifications
+    });
+  } catch (error) {
+    console.error('Get user notifications error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});
+
+// POST /api/notifications/:notificationId/read - Mark notification as read
+router.post('/notifications/:notificationId/read', async (req, res) => {
+  try {
+    const { notificationId } = req.params;
+    const notification = await csvService.markNotificationAsRead(notificationId);
+    
+    res.json({
+      success: true,
+      message: 'Notification marked as read',
+      notification: notification
+    });
+  } catch (error) {
+    console.error('Mark notification as read error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Internal server error'
+    });
+  }
+});
+
+// GET /api/notifications/unread-count/:department - Get unread count for a department
+router.get('/notifications/unread-count/:department', async (req, res) => {
+  try {
+    const { department } = req.params;
+    const count = await csvService.getUnreadNotificationCount(department);
+    
+    res.json({
+      success: true,
+      count: count
+    });
+  } catch (error) {
+    console.error('Get unread count error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
     });
   }
 });

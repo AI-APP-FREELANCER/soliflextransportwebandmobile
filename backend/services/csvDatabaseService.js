@@ -4,21 +4,31 @@ const csv = require('csv-parser');
 const createCsvWriter = require('csv-writer').createObjectCsvWriter;
 
 const CSV_FILE_PATH = path.join(__dirname, '../backend.csv');
+const NOTIFICATIONS_CSV_PATH = path.join(__dirname, '../notifications.csv');
 
 // Department list
 const DEPARTMENTS = [
   'Accounts Team',
   'Admin',
-  'Fabric IAF unit-1 / Soliflex unit-1',
-  'Fabric Solifelx unit-III',
-  'Fabric Unit-IV/ Soliflex unit-II',
-  'Security-Factory 1',
-  'Security-Factory 2',
-  'Security-Factory 3',
-  'Security-Factory 4',
-  'Soliflex Unit-III',
-  'Stores IAF Unit-1/ Soliflex unit-1',
-  'Stores Unit-IV/ soliflex unit-II'
+'IAF Unit-1 Fabric',
+'IAF Unit-1 Stores',
+'IAT Unit-1 Maintenance',
+'IAF Unit-1 Security',
+'IAF Unit-4 Fabric',
+'IAF Unit-4 Stores',
+'IAF Unit-4 Maintenance',
+'IAF Unit-4 Security',
+'IAF Unit-6 Fabric',
+'IAF Unit-6 Stores',
+'IAF Unit-6 Maintenance',
+'IAF Unit-6 Security',
+'Purchase',
+'Soliflex Unit-1 Fabric',
+'Soliflex Unit-1 Stores',
+'Soliflex Unit-1 Security',
+'Soliflex Unit-2 Fabric',
+'Soliflex Unit-2 Stores',
+'Soliflex Unit-2 Security'
 ];
 
 // Vendor list (45 vendors from provided data)
@@ -1278,6 +1288,20 @@ async function writeOrder(order) {
   if (!order.original_total_toll_charges) order.original_total_toll_charges = '';
   if (!order.original_segment_count) order.original_segment_count = '';
   
+  // Ensure auditing fields have defaults if not set
+  if (!order.approved_timestamp) order.approved_timestamp = '';
+  if (!order.approved_by_member) order.approved_by_member = '';
+  if (!order.approved_by_department) order.approved_by_department = '';
+  if (!order.vehicle_started_at_timestamp) order.vehicle_started_at_timestamp = '';
+  if (!order.vehicle_started_from_location) order.vehicle_started_from_location = '';
+  if (!order.security_entry_timestamp) order.security_entry_timestamp = '';
+  if (!order.security_entry_member_name) order.security_entry_member_name = '';
+  if (!order.security_entry_checkpoint_location) order.security_entry_checkpoint_location = '';
+  if (!order.stores_validation_timestamp) order.stores_validation_timestamp = '';
+  if (!order.vehicle_exited_timestamp) order.vehicle_exited_timestamp = '';
+  if (!order.exit_approved_by_timestamp) order.exit_approved_by_timestamp = '';
+  if (!order.exit_approved_by_member_name) order.exit_approved_by_member_name = '';
+  
   // Check if order already exists (update) or is new
   const existingIndex = orders.findIndex(o => o.order_id === order.order_id);
   
@@ -1305,6 +1329,7 @@ async function writeOrder(order) {
       { id: 'created_at', title: 'created_at' },
       { id: 'creator_department', title: 'creator_department' },
       { id: 'creator_user_id', title: 'creator_user_id' }, // CRITICAL FIX: Track creator user ID
+      { id: 'creator_name', title: 'creator_name' }, // Track creator's full name
       { id: 'trip_segments', title: 'trip_segments' },
       { id: 'is_amended', title: 'is_amended' },
       { id: 'original_trip_type', title: 'original_trip_type' },
@@ -1322,7 +1347,20 @@ async function writeOrder(order) {
       { id: 'original_total_weight', title: 'original_total_weight' },
       { id: 'original_total_invoice_amount', title: 'original_total_invoice_amount' },
       { id: 'original_total_toll_charges', title: 'original_total_toll_charges' },
-      { id: 'original_segment_count', title: 'original_segment_count' }
+      { id: 'original_segment_count', title: 'original_segment_count' },
+      // Order lifecycle auditing fields
+      { id: 'approved_timestamp', title: 'approved_timestamp' },
+      { id: 'approved_by_member', title: 'approved_by_member' },
+      { id: 'approved_by_department', title: 'approved_by_department' },
+      { id: 'vehicle_started_at_timestamp', title: 'vehicle_started_at_timestamp' },
+      { id: 'vehicle_started_from_location', title: 'vehicle_started_from_location' },
+      { id: 'security_entry_timestamp', title: 'security_entry_timestamp' },
+      { id: 'security_entry_member_name', title: 'security_entry_member_name' },
+      { id: 'security_entry_checkpoint_location', title: 'security_entry_checkpoint_location' },
+      { id: 'stores_validation_timestamp', title: 'stores_validation_timestamp' },
+      { id: 'vehicle_exited_timestamp', title: 'vehicle_exited_timestamp' },
+      { id: 'exit_approved_by_timestamp', title: 'exit_approved_by_timestamp' },
+      { id: 'exit_approved_by_member_name', title: 'exit_approved_by_member_name' }
     ]
   });
   
@@ -1377,6 +1415,7 @@ async function updateOrderStatus(orderId, newStatus, updateData = {}) {
       { id: 'created_at', title: 'created_at' },
       { id: 'creator_department', title: 'creator_department' },
       { id: 'creator_user_id', title: 'creator_user_id' }, // CRITICAL FIX: Track creator user ID
+      { id: 'creator_name', title: 'creator_name' }, // Track creator's full name
       { id: 'trip_segments', title: 'trip_segments' },
       { id: 'is_amended', title: 'is_amended' },
       { id: 'original_trip_type', title: 'original_trip_type' },
@@ -1394,7 +1433,20 @@ async function updateOrderStatus(orderId, newStatus, updateData = {}) {
       { id: 'original_total_weight', title: 'original_total_weight' },
       { id: 'original_total_invoice_amount', title: 'original_total_invoice_amount' },
       { id: 'original_total_toll_charges', title: 'original_total_toll_charges' },
-      { id: 'original_segment_count', title: 'original_segment_count' }
+      { id: 'original_segment_count', title: 'original_segment_count' },
+      // Order lifecycle auditing fields
+      { id: 'approved_timestamp', title: 'approved_timestamp' },
+      { id: 'approved_by_member', title: 'approved_by_member' },
+      { id: 'approved_by_department', title: 'approved_by_department' },
+      { id: 'vehicle_started_at_timestamp', title: 'vehicle_started_at_timestamp' },
+      { id: 'vehicle_started_from_location', title: 'vehicle_started_from_location' },
+      { id: 'security_entry_timestamp', title: 'security_entry_timestamp' },
+      { id: 'security_entry_member_name', title: 'security_entry_member_name' },
+      { id: 'security_entry_checkpoint_location', title: 'security_entry_checkpoint_location' },
+      { id: 'stores_validation_timestamp', title: 'stores_validation_timestamp' },
+      { id: 'vehicle_exited_timestamp', title: 'vehicle_exited_timestamp' },
+      { id: 'exit_approved_by_timestamp', title: 'exit_approved_by_timestamp' },
+      { id: 'exit_approved_by_member_name', title: 'exit_approved_by_member_name' }
     ]
   });
   
@@ -1776,6 +1828,127 @@ async function writeAllVehicles(vehicles) {
   await vehiclesWriter.writeRecords(vehicles);
 }
 
+// Initialize notifications CSV file with headers if it doesn't exist
+function initializeNotificationsCsvFile() {
+  if (!fs.existsSync(NOTIFICATIONS_CSV_PATH)) {
+    const headers = 'notification_id,order_id,recipient_department,notification_type,message,status,created_at,related_user_id\n';
+    fs.writeFileSync(NOTIFICATIONS_CSV_PATH, headers, 'utf8');
+  }
+}
+
+// Read all notifications from CSV
+function readNotifications() {
+  return new Promise((resolve, reject) => {
+    const notifications = [];
+    
+    if (!fs.existsSync(NOTIFICATIONS_CSV_PATH)) {
+      return resolve([]);
+    }
+
+    fs.createReadStream(NOTIFICATIONS_CSV_PATH)
+      .pipe(csv())
+      .on('data', (row) => {
+        if (row.notification_id && row.notification_id.trim() !== '') {
+          notifications.push(row);
+        }
+      })
+      .on('end', () => {
+        resolve(notifications);
+      })
+      .on('error', (error) => {
+        reject(error);
+      });
+  });
+}
+
+// Write notification to CSV
+async function writeNotification(notification) {
+  initializeNotificationsCsvFile();
+  
+  const notifications = await readNotifications();
+  
+  // Generate sequential notification ID
+  let maxNotificationId = 0;
+  if (notifications.length > 0) {
+    maxNotificationId = Math.max(...notifications.map(n => parseInt(n.notification_id) || 0));
+  }
+  const newNotificationId = maxNotificationId + 1;
+
+  const newNotification = {
+    notification_id: newNotificationId.toString(),
+    order_id: notification.orderId || '',
+    recipient_department: notification.recipientDepartment || '',
+    notification_type: notification.notificationType || 'ORDER_CREATED',
+    message: notification.message || '',
+    status: notification.status || 'unread',
+    created_at: notification.createdAt || new Date().toISOString(),
+    related_user_id: notification.relatedUserId || ''
+  };
+
+  notifications.push(newNotification);
+
+  const notificationsWriter = createCsvWriter({
+    path: NOTIFICATIONS_CSV_PATH,
+    header: [
+      { id: 'notification_id', title: 'notification_id' },
+      { id: 'order_id', title: 'order_id' },
+      { id: 'recipient_department', title: 'recipient_department' },
+      { id: 'notification_type', title: 'notification_type' },
+      { id: 'message', title: 'message' },
+      { id: 'status', title: 'status' },
+      { id: 'created_at', title: 'created_at' },
+      { id: 'related_user_id', title: 'related_user_id' }
+    ]
+  });
+
+  await notificationsWriter.writeRecords(notifications);
+  return newNotification;
+}
+
+// Get notifications by department
+async function getNotificationsByDepartment(department) {
+  const notifications = await readNotifications();
+  return notifications.filter(n => n.recipient_department === department);
+}
+
+// Mark notification as read
+async function markNotificationAsRead(notificationId) {
+  const notifications = await readNotifications();
+  const notificationIndex = notifications.findIndex(n => n.notification_id === notificationId);
+  
+  if (notificationIndex === -1) {
+    throw new Error('Notification not found');
+  }
+  
+  notifications[notificationIndex].status = 'read';
+  
+  const notificationsWriter = createCsvWriter({
+    path: NOTIFICATIONS_CSV_PATH,
+    header: [
+      { id: 'notification_id', title: 'notification_id' },
+      { id: 'order_id', title: 'order_id' },
+      { id: 'recipient_department', title: 'recipient_department' },
+      { id: 'notification_type', title: 'notification_type' },
+      { id: 'message', title: 'message' },
+      { id: 'status', title: 'status' },
+      { id: 'created_at', title: 'created_at' },
+      { id: 'related_user_id', title: 'related_user_id' }
+    ]
+  });
+  
+  await notificationsWriter.writeRecords(notifications);
+  return notifications[notificationIndex];
+}
+
+// Get unread notification count for a department
+async function getUnreadNotificationCount(department) {
+  const notifications = await readNotifications();
+  return notifications.filter(n => 
+    n.recipient_department === department && 
+    (n.status === 'unread' || n.status === '')
+  ).length;
+}
+
 module.exports = {
   initializeCsvFile,
   readUsers,
@@ -1825,6 +1998,12 @@ module.exports = {
   readVendorsWithPricing,
   writeAllUsers,
   writeAllVendors,
-  writeAllVehicles
+  writeAllVehicles,
+  // Notification functions
+  readNotifications,
+  writeNotification,
+  getNotificationsByDepartment,
+  markNotificationAsRead,
+  getUnreadNotificationCount
 };
 

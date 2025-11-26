@@ -207,7 +207,7 @@ class _AnalyticsDashboardScreenState extends State<AnalyticsDashboardScreen> {
             const SizedBox(width: 16),
             Expanded(
               child: _buildStatCard(
-                'Total Invoice',
+                'Freight Charges',
                 '₹$totalInvoice',
                 Icons.attach_money,
                 Colors.green,

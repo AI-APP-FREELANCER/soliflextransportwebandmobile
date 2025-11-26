@@ -1109,7 +1109,7 @@ class _VendorFormDialogState extends State<_VendorFormDialog> {
                 TextFormField(
                   controller: _klController,
                   decoration: const InputDecoration(
-                    labelText: 'KL',
+                    labelText: 'Kilo Meters',
                     border: OutlineInputBorder(),
                   ),
                   keyboardType: TextInputType.number,

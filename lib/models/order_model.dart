@@ -23,6 +23,7 @@ class OrderModel {
   final int? totalTollCharges; // Cumulative sum of all segment toll charges
   final String? creatorDepartment; // Department of the user who created the order
   final String? creatorUserId; // ID of the user who created the order
+  final String? creatorName; // Full name of the user who created the order
   // Amendment audit trail fields
   final String? amendmentRequestedBy; // Name of user who requested amendment
   final String? amendmentRequestedDepartment; // Department of user who requested amendment
@@ -34,6 +35,19 @@ class OrderModel {
   final int? originalTotalInvoiceAmount; // Total invoice before amendment
   final int? originalTotalTollCharges; // Total toll before amendment
   final int? originalSegmentCount; // Number of segments before amendment
+  // Order lifecycle auditing fields
+  final DateTime? approvedTimestamp; // When order was approved
+  final String? approvedByMember; // Member who approved the order
+  final String? approvedByDepartment; // Department of approver
+  final DateTime? vehicleStartedAtTimestamp; // When vehicle/process execution began
+  final String? vehicleStartedFromLocation; // Location where movement began
+  final DateTime? securityEntryTimestamp; // When security entry was recorded
+  final String? securityEntryMemberName; // Security guard who recorded entry
+  final String? securityEntryCheckpointLocation; // Checkpoint location
+  final DateTime? storesValidationTimestamp; // When stores validation was completed
+  final DateTime? vehicleExitedTimestamp; // When vehicle exited
+  final DateTime? exitApprovedByTimestamp; // When exit was approved
+  final String? exitApprovedByMemberName; // Security member who approved exit
 
   OrderModel({
     required this.orderId,
@@ -56,6 +70,7 @@ class OrderModel {
     this.totalTollCharges,
     this.creatorDepartment,
     this.creatorUserId,
+    this.creatorName,
     this.amendmentRequestedBy,
     this.amendmentRequestedDepartment,
     this.amendmentRequestedAt,
@@ -65,6 +80,18 @@ class OrderModel {
     this.originalTotalInvoiceAmount,
     this.originalTotalTollCharges,
     this.originalSegmentCount,
+    this.approvedTimestamp,
+    this.approvedByMember,
+    this.approvedByDepartment,
+    this.vehicleStartedAtTimestamp,
+    this.vehicleStartedFromLocation,
+    this.securityEntryTimestamp,
+    this.securityEntryMemberName,
+    this.securityEntryCheckpointLocation,
+    this.storesValidationTimestamp,
+    this.vehicleExitedTimestamp,
+    this.exitApprovedByTimestamp,
+    this.exitApprovedByMemberName,
   });
 
   factory OrderModel.fromJson(Map<String, dynamic> json) {
@@ -144,6 +171,7 @@ class OrderModel {
           : null,
       creatorDepartment: json['creator_department']?.toString(),
       creatorUserId: json['creator_user_id']?.toString(),
+      creatorName: json['creator_name']?.toString(),
       // Amendment audit trail fields
       amendmentRequestedBy: json['amendment_requested_by']?.toString(),
       amendmentRequestedDepartment: json['amendment_requested_department']?.toString(),
@@ -175,6 +203,31 @@ class OrderModel {
               ? json['original_segment_count']
               : int.tryParse(json['original_segment_count'].toString()))
           : null,
+      // Order lifecycle auditing fields
+      approvedTimestamp: json['approved_timestamp'] != null 
+          ? DateTime.tryParse(json['approved_timestamp'].toString())
+          : null,
+      approvedByMember: json['approved_by_member']?.toString(),
+      approvedByDepartment: json['approved_by_department']?.toString(),
+      vehicleStartedAtTimestamp: json['vehicle_started_at_timestamp'] != null
+          ? DateTime.tryParse(json['vehicle_started_at_timestamp'].toString())
+          : null,
+      vehicleStartedFromLocation: json['vehicle_started_from_location']?.toString(),
+      securityEntryTimestamp: json['security_entry_timestamp'] != null
+          ? DateTime.tryParse(json['security_entry_timestamp'].toString())
+          : null,
+      securityEntryMemberName: json['security_entry_member_name']?.toString(),
+      securityEntryCheckpointLocation: json['security_entry_checkpoint_location']?.toString(),
+      storesValidationTimestamp: json['stores_validation_timestamp'] != null
+          ? DateTime.tryParse(json['stores_validation_timestamp'].toString())
+          : null,
+      vehicleExitedTimestamp: json['vehicle_exited_timestamp'] != null
+          ? DateTime.tryParse(json['vehicle_exited_timestamp'].toString())
+          : null,
+      exitApprovedByTimestamp: json['exit_approved_by_timestamp'] != null
+          ? DateTime.tryParse(json['exit_approved_by_timestamp'].toString())
+          : null,
+      exitApprovedByMemberName: json['exit_approved_by_member_name']?.toString(),
     );
   }
 
@@ -200,6 +253,7 @@ class OrderModel {
       if (totalTollCharges != null) 'total_toll_charges': totalTollCharges,
       if (creatorDepartment != null) 'creator_department': creatorDepartment,
       if (creatorUserId != null) 'creator_user_id': creatorUserId,
+      if (creatorName != null) 'creator_name': creatorName,
       if (amendmentRequestedBy != null) 'amendment_requested_by': amendmentRequestedBy,
       if (amendmentRequestedDepartment != null) 'amendment_requested_department': amendmentRequestedDepartment,
       if (amendmentRequestedAt != null) 'amendment_requested_at': amendmentRequestedAt?.toIso8601String(),
@@ -209,6 +263,19 @@ class OrderModel {
       if (originalTotalInvoiceAmount != null) 'original_total_invoice_amount': originalTotalInvoiceAmount,
       if (originalTotalTollCharges != null) 'original_total_toll_charges': originalTotalTollCharges,
       if (originalSegmentCount != null) 'original_segment_count': originalSegmentCount,
+      // Order lifecycle auditing fields
+      if (approvedTimestamp != null) 'approved_timestamp': approvedTimestamp?.toIso8601String(),
+      if (approvedByMember != null) 'approved_by_member': approvedByMember,
+      if (approvedByDepartment != null) 'approved_by_department': approvedByDepartment,
+      if (vehicleStartedAtTimestamp != null) 'vehicle_started_at_timestamp': vehicleStartedAtTimestamp?.toIso8601String(),
+      if (vehicleStartedFromLocation != null) 'vehicle_started_from_location': vehicleStartedFromLocation,
+      if (securityEntryTimestamp != null) 'security_entry_timestamp': securityEntryTimestamp?.toIso8601String(),
+      if (securityEntryMemberName != null) 'security_entry_member_name': securityEntryMemberName,
+      if (securityEntryCheckpointLocation != null) 'security_entry_checkpoint_location': securityEntryCheckpointLocation,
+      if (storesValidationTimestamp != null) 'stores_validation_timestamp': storesValidationTimestamp?.toIso8601String(),
+      if (vehicleExitedTimestamp != null) 'vehicle_exited_timestamp': vehicleExitedTimestamp?.toIso8601String(),
+      if (exitApprovedByTimestamp != null) 'exit_approved_by_timestamp': exitApprovedByTimestamp?.toIso8601String(),
+      if (exitApprovedByMemberName != null) 'exit_approved_by_member_name': exitApprovedByMemberName,
     };
   }
 

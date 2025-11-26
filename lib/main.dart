@@ -6,6 +6,7 @@ import 'providers/department_provider.dart';
 import 'providers/vendor_provider.dart';
 import 'providers/rfq_provider.dart';
 import 'providers/order_provider.dart';
+import 'providers/notification_provider.dart';
 import 'screens/login_screen.dart';
 import 'screens/register_screen.dart';
 import 'screens/home_screen.dart';
@@ -13,6 +14,7 @@ import 'screens/rfq_create_screen.dart';
 import 'screens/my_rfqs_screen.dart';
 import 'screens/approval_dashboard_screen.dart';
 import 'screens/orders_dashboard_screen.dart';
+import 'screens/notifications_screen.dart';
 
 void main() {
   runApp(const SoliflexApp());
@@ -30,6 +32,7 @@ class SoliflexApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => VendorProvider()),
         ChangeNotifierProvider(create: (_) => RFQProvider()),
         ChangeNotifierProvider(create: (_) => OrderProvider()),
+        ChangeNotifierProvider(create: (_) => NotificationProvider()),
       ],
       child: Consumer<AuthProvider>(
         builder: (context, authProvider, child) {
@@ -48,6 +51,7 @@ class SoliflexApp extends StatelessWidget {
               '/rfq/create': (context) => const RFQCreateScreen(),
               '/orders': (context) => const OrdersDashboardScreen(),
               '/approvals': (context) => const ApprovalDashboardScreen(),
+              '/notifications': (context) => const NotificationsScreen(),
             },
             builder: (context, child) {
               return MediaQuery(

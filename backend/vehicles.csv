@@ -1,6 +1,6 @@
 vehicleId,vehicle_number,type,capacity_kg,vehicle_type,vendor_vehicle,status
 1,KA06AA3457,Open,7500,19ft,company_vehicle,Booked
-2,KA02AB1409,Open,7500,19ft,company_vehicle,Free
+2,KA02AB1409,Open,7500,19ft,company_vehicle,Booked
 3,KA51AF2387,Container,7500,19ft,company_vehicle,Free
 4,KA04AC7980,Closed,7500,19ft,company_vehicle,Free
 5,HR47B3343,Open,7500,19ft,company_vehicle,Free
@@ -10,7 +10,7 @@ vehicleId,vehicle_number,type,capacity_kg,vehicle_type,vendor_vehicle,status
 9,KA01AA1001,Open,12500,22ft,company_vehicle,Free
 10,KA01AA1002,Open,6250,17ft,company_vehicle,Booked
 11,KA01AA1003,Open,5000,17ft,company_vehicle,Booked
-12,KA01AA1004,Open,1700,9ft,company_vehicle,Free
+12,KA01AA1004,Open,1700,9ft,company_vehicle,Booked
 13,KA01AA1005,Open,1500,9ft,company_vehicle,Booked
 14,KA01AA1006,Closed,1300,9ft,company_vehicle,Booked
 15,KA01AA1007,Closed,1100,9ft,company_vehicle,Booked
@@ -24,4 +24,4 @@ vehicleId,vehicle_number,type,capacity_kg,vehicle_type,vendor_vehicle,status
 23,KA01AA1015,Open,7500,19ft,company_vehicle,Free
 24,KA01AA1016,Open,7500,19ft,company_vehicle,Free
 25,KA01AA1017,Closed,6250,17ft,company_vehicle,Booked
-26,KA01AA1018,Closed,5000,17ft,company_vehicle,Free
+26,KA01AA1018,Closed,5000,17ft,company_vehicle,Booked

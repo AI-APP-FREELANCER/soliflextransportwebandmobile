@@ -6,19 +6,31 @@ import '../models/vendor_model.dart';
 import '../models/vehicle_model.dart';
 import '../models/rfq_model.dart';
 import '../models/order_model.dart';
+import '../models/notification_model.dart';
 
 // Conditional import for web
 import 'dart:html' as html if (dart.library.html) 'dart:html';
 
 class ApiService {
   // Dynamically determine base URL based on platform
-  // For web: Use current hostname (works for both localhost and VM IP)
+  // For web: Use current hostname and protocol (works for both localhost, VM IP, and subdomain)
   // For mobile: Use localhost or configured IP
   static String get baseUrl {
     if (kIsWeb) {
-      // For web, use the current hostname and port 3000
-      final hostname = html.window.location.hostname;
-      return 'http://$hostname:3000/api';
+      // For web, use the current hostname, protocol, and port
+      final hostname = html.window.location.hostname ?? 'localhost';
+      final protocol = html.window.location.protocol; // Gets 'http:' or 'https:'
+      final baseProtocol = protocol == 'https:' ? 'https' : 'http';
+      
+      // If using subdomain (e.g., transport.soliflexpackaging.com), use /api path
+      // If using IP or localhost, use :3000 port
+      if (hostname.contains('.') && !hostname.startsWith('localhost') && !hostname.startsWith('127.0.0.1') && !hostname.startsWith('192.168.')) {
+        // Subdomain or domain - use /api path (Nginx will proxy to backend)
+        return '$baseProtocol://$hostname/api';
+      } else {
+        // IP address or localhost - use :3000 port directly
+        return '$baseProtocol://$hostname:3000/api';
+      }
     } else {
       // For mobile/emulator, use localhost or configured IP
       // - Android Emulator: http://10.0.2.2:3000/api
@@ -632,6 +644,7 @@ class ApiService {
   Future<Map<String, dynamic>> updateOrderStatus({
     required String orderId,
     required String newStatus,
+    String? userId, // Optional userId for audit tracking
   }) async {
     try {
       final response = await http.post(
@@ -640,6 +653,7 @@ class ApiService {
         body: jsonEncode({
           'orderId': orderId,
           'newStatus': newStatus,
+          if (userId != null) 'userId': userId,
         }),
       );
 
@@ -1210,6 +1224,112 @@ class ApiService {
     } catch (e) {
       return {
         'success': false,
+        'message': 'Network error: ${e.toString()}',
+      };
+    }
+  }
+
+  // ============================================
+  // NOTIFICATION OPERATIONS
+  // ============================================
+
+  // GET /api/notifications/department/:department
+  Future<Map<String, dynamic>> getNotificationsByDepartment(String department) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/notifications/department/${Uri.encodeComponent(department)}'),
+        headers: {'Content-Type': 'application/json'},
+      );
+
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      return {
+        'success': data['success'] ?? false,
+        'notifications': data['notifications'] != null
+            ? (data['notifications'] as List<dynamic>)
+                .map((n) => NotificationModel.fromJson(n as Map<String, dynamic>))
+                .toList()
+            : <NotificationModel>[],
+        'message': data['message'] ?? '',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'notifications': <NotificationModel>[],
+        'message': 'Network error: ${e.toString()}',
+      };
+    }
+  }
+
+  // GET /api/notifications/user/:userId
+  Future<Map<String, dynamic>> getNotificationsForUser(String userId) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/notifications/user/$userId'),
+        headers: {'Content-Type': 'application/json'},
+      );
+
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      return {
+        'success': data['success'] ?? false,
+        'notifications': data['notifications'] != null
+            ? (data['notifications'] as List<dynamic>)
+                .map((n) => NotificationModel.fromJson(n as Map<String, dynamic>))
+                .toList()
+            : <NotificationModel>[],
+        'message': data['message'] ?? '',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'notifications': <NotificationModel>[],
+        'message': 'Network error: ${e.toString()}',
+      };
+    }
+  }
+
+  // POST /api/notifications/:notificationId/read
+  Future<Map<String, dynamic>> markNotificationAsRead(String notificationId) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/notifications/$notificationId/read'),
+        headers: {'Content-Type': 'application/json'},
+      );
+
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      return {
+        'success': data['success'] ?? false,
+        'message': data['message'] ?? '',
+        'notification': data['notification'] != null
+            ? NotificationModel.fromJson(data['notification'] as Map<String, dynamic>)
+            : null,
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'message': 'Network error: ${e.toString()}',
+        'notification': null,
+      };
+    }
+  }
+
+  // GET /api/notifications/unread-count/:department
+  Future<Map<String, dynamic>> getUnreadNotificationCount(String department) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/notifications/unread-count/${Uri.encodeComponent(department)}'),
+        headers: {'Content-Type': 'application/json'},
+      );
+
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      return {
+        'success': data['success'] ?? false,
+        'count': data['count'] ?? 0,
+        'message': data['message'] ?? '',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'count': 0,
         'message': 'Network error: ${e.toString()}',
       };
     }

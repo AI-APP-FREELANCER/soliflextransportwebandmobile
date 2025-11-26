@@ -165,6 +165,7 @@ class OrderProvider with ChangeNotifier {
   Future<Map<String, dynamic>> updateOrderStatus({
     required String orderId,
     required String newStatus,
+    String? userId, // Optional userId for audit tracking
   }) async {
     _isLoading = true;
     _error = null;
@@ -174,6 +175,7 @@ class OrderProvider with ChangeNotifier {
       final result = await _apiService.updateOrderStatus(
         orderId: orderId,
         newStatus: newStatus,
+        userId: userId,
       );
 
       if (result['success'] == true) {

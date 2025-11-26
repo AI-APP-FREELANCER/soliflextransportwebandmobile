@@ -1,0 +1,12 @@
+notification_id,order_id,recipient_department,notification_type,message,status,created_at,related_user_id
+1,Order-1035,Accounts Team,ORDER_CREATED,"New order created, pending for approval. Order ID: Order-1035",read,2025-11-25T19:21:15.652Z,5
+2,Order-1035,Security-Factory 3,ORDER_APPROVED,"Vehicle entry/exit notification for Bhagyashree, IAF unit-3. Order ID: Order-1035",unread,2025-11-25T19:22:02.308Z,5
+3,Order-1035,Soliflex Unit-III,ORDER_APPROVED,Order approved and requires your attention. Order ID: Order-1035,unread,2025-11-25T19:22:02.314Z,5
+4,Order-1035,Fabric Solifelx unit-III,ORDER_APPROVED,"Material verification required for Bhagyashree, IAF unit-3. Order ID: Order-1035",unread,2025-11-25T19:22:02.318Z,5
+5,Order-1036,Accounts Team,ORDER_CREATED,"New order created, pending for approval. Order ID: Order-1036",read,2025-11-25T19:23:19.793Z,6
+6,Order-1036,Security-Factory 2,ORDER_APPROVED,"Vehicle entry/exit notification for Calibrics, Soliflex unit-2. Order ID: Order-1036",unread,2025-11-26T06:39:28.285Z,6
+7,Order-1036,Stores Unit-IV/ soliflex unit-II,ORDER_APPROVED,"Material verification required for Calibrics, Soliflex unit-2. Order ID: Order-1036",unread,2025-11-26T06:39:28.290Z,6
+8,Order-1037,Accounts Team,ORDER_CREATED,"New order created, pending for approval. Order ID: Order-1037",unread,2025-11-26T06:43:56.202Z,5
+9,Order-1037,Security-Factory 4,ORDER_APPROVED,"Vehicle entry/exit notification for Kamal Tapes, Soliflex unit-4. Order ID: Order-1037",unread,2025-11-26T06:44:16.870Z,5
+10,Order-1037,Stores Unit-IV/ soliflex unit-II,ORDER_APPROVED,"Material verification required for Kamal Tapes, Soliflex unit-4. Order ID: Order-1037",unread,2025-11-26T06:44:16.875Z,5
+11,Order-1037,Fabric Unit-IV/ Soliflex unit-II,ORDER_APPROVED,"Material verification required for Kamal Tapes, Soliflex unit-4. Order ID: Order-1037",unread,2025-11-26T06:44:16.882Z,5

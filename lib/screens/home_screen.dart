@@ -7,6 +7,7 @@ import '../models/vehicle_model.dart';
 import '../services/api_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/permission_utils.dart';
+import '../widgets/notification_badge.dart';
 import 'admin_dashboard_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -92,6 +93,8 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         title: const Text('Soliflex Packaging - Home'),
         actions: [
+          // Notification badge
+          const NotificationBadge(),
           // User info in top right corner
           Consumer<AuthProvider>(
             builder: (context, authProvider, child) {
@@ -753,7 +756,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
             ),
             const SizedBox(height: 10),
-            _buildRevenueItem(context, 'Total Invoice', '₹$totalInvoice', Colors.green),
+            _buildRevenueItem(context, 'Freight Charges', '₹$totalInvoice', Colors.green),
             const SizedBox(height: 8),
             _buildRevenueItem(context, 'Total Toll Charges', '₹$totalToll', Colors.blue),
             const Divider(height: 16, thickness: 0.5, color: AppTheme.darkBorder),
