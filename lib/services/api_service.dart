@@ -24,7 +24,10 @@ class ApiService {
       
       // If using subdomain (e.g., transport.soliflexpackaging.com), use /api path
       // If using IP or localhost, use :3000 port
-      if (hostname.contains('.') && !hostname.startsWith('localhost') && !hostname.startsWith('127.0.0.1') && !hostname.startsWith('192.168.')) {
+      final ipRegex = RegExp(r'^\d{1,3}(\.\d{1,3}){3}$');
+      final isIpAddress = ipRegex.hasMatch(hostname);
+
+      if (!isIpAddress && hostname.contains('.') && !hostname.startsWith('localhost') && !hostname.startsWith('127.0.0.1') && !hostname.startsWith('192.168.')) {
         // Subdomain or domain - use /api path (Nginx will proxy to backend)
         return '$baseProtocol://$hostname/api';
       } else {
