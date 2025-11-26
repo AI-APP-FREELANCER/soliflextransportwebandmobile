@@ -10,3 +10,9 @@ notification_id,order_id,recipient_department,notification_type,message,status,c
 9,Order-1037,Security-Factory 4,ORDER_APPROVED,"Vehicle entry/exit notification for Kamal Tapes, Soliflex unit-4. Order ID: Order-1037",unread,2025-11-26T06:44:16.870Z,5
 10,Order-1037,Stores Unit-IV/ soliflex unit-II,ORDER_APPROVED,"Material verification required for Kamal Tapes, Soliflex unit-4. Order ID: Order-1037",unread,2025-11-26T06:44:16.875Z,5
 11,Order-1037,Fabric Unit-IV/ Soliflex unit-II,ORDER_APPROVED,"Material verification required for Kamal Tapes, Soliflex unit-4. Order ID: Order-1037",unread,2025-11-26T06:44:16.882Z,5
+12,Order-1038,Accounts Team,ORDER_CREATED,"New order created, pending for approval. Order ID: Order-1038",unread,2025-11-26T11:25:11.933Z,5
+13,Order-1038,Security-Factory 2,ORDER_APPROVED,"Vehicle entry/exit notification for Bangalore airport, Soliflex unit-2. Order ID: Order-1038",unread,2025-11-26T11:25:24.932Z,5
+14,Order-1038,Stores Unit-IV/ soliflex unit-II,ORDER_APPROVED,"Material verification required for Bangalore airport, Soliflex unit-2. Order ID: Order-1038",unread,2025-11-26T11:25:24.935Z,5
+15,Order-1033,Security-Factory 4,ORDER_APPROVED,"Vehicle entry/exit notification for Ambica pattern, IAF unit-4. Order ID: Order-1033",unread,2025-11-26T11:29:43.098Z,1
+16,Order-1033,Stores Unit-IV/ soliflex unit-II,ORDER_APPROVED,"Material verification required for Ambica pattern, IAF unit-4. Order ID: Order-1033",unread,2025-11-26T11:29:43.104Z,1
+17,Order-1033,Fabric Unit-IV/ Soliflex unit-II,ORDER_APPROVED,"Material verification required for Ambica pattern, IAF unit-4. Order ID: Order-1033",unread,2025-11-26T11:29:43.108Z,1

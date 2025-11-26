@@ -69,7 +69,7 @@ router.get('/orders/:orderId', async (req, res) => {
 // POST /api/create-order - Create a new order
 router.post('/create-order', async (req, res) => {
   try {
-    const {
+    let {
       userId,
       source,
       destination,
@@ -1113,16 +1113,13 @@ router.post('/amend-order', async (req, res) => {
     // Store original segment count for identifying new segments in approval modal
     const originalSegmentCount = existingSegments.length;
     
-    // Initialize workflow for new segments if order is En-Route
-    if (order.order_status === 'En-Route') {
-      for (let i = originalSegmentCount; i < updatedSegments.length; i++) {
-        const segment = updatedSegments[i];
-        if (!segment.workflow || !Array.isArray(segment.workflow) || segment.workflow.length === 0) {
-          const location = segment.destination || segment.source || '';
-          segment.workflow = csvService.initializeSegmentWorkflow(segment, location);
-          // New segments start with SECURITY_ENTRY_PENDING
-          segment.segment_status = 'SECURITY_ENTRY_PENDING';
-        }
+    // Initialize workflow for any new segments (regardless of current order status)
+    for (let i = originalSegmentCount; i < updatedSegments.length; i++) {
+      const segment = updatedSegments[i];
+      if (!segment.workflow || !Array.isArray(segment.workflow) || segment.workflow.length === 0) {
+        const location = segment.destination || segment.source || '';
+        segment.workflow = csvService.initializeSegmentWorkflow(segment, location);
+        segment.segment_status = 'SECURITY_ENTRY_PENDING';
       }
     }
     

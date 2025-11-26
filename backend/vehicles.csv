@@ -1,7 +1,7 @@
 vehicleId,vehicle_number,type,capacity_kg,vehicle_type,vendor_vehicle,status
 1,KA06AA3457,Open,7500,19ft,company_vehicle,Booked
 2,KA02AB1409,Open,7500,19ft,company_vehicle,Booked
-3,KA51AF2387,Container,7500,19ft,company_vehicle,Free
+3,KA51AF2387,Container,7500,19ft,company_vehicle,Booked
 4,KA04AC7980,Closed,7500,19ft,company_vehicle,Free
 5,HR47B3343,Open,7500,19ft,company_vehicle,Free
 6,KA06A9729,Closed,7500,19ft,rented_vehicle,Free
