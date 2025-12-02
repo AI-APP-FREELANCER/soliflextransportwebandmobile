@@ -6,6 +6,25 @@ const createCsvWriter = require('csv-writer').createObjectCsvWriter;
 const CSV_FILE_PATH = path.join(__dirname, '../backend.csv');
 const NOTIFICATIONS_CSV_PATH = path.join(__dirname, '../notifications.csv');
 
+// Helper function to get current timestamp in IST (UTC+5:30)
+function getISTTimestamp() {
+  const now = new Date();
+  // IST is UTC+5:30, so add 5 hours 30 minutes (19800000 milliseconds)
+  const istOffset = 5.5 * 60 * 60 * 1000; // 5.5 hours in milliseconds
+  const istTime = new Date(now.getTime() + istOffset);
+  
+  // Format as ISO string with IST offset (+05:30)
+  const year = istTime.getUTCFullYear();
+  const month = String(istTime.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(istTime.getUTCDate()).padStart(2, '0');
+  const hours = String(istTime.getUTCHours()).padStart(2, '0');
+  const minutes = String(istTime.getUTCMinutes()).padStart(2, '0');
+  const seconds = String(istTime.getUTCSeconds()).padStart(2, '0');
+  const milliseconds = String(istTime.getUTCMilliseconds()).padStart(3, '0');
+  
+  return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}.${milliseconds}+05:30`;
+}
+
 // Department list
 const DEPARTMENTS = [
   'Accounts Team',
@@ -169,10 +188,16 @@ async function writeUser(user) {
   }
   const newUserId = maxUserId + 1;
 
-  // Check if user with same fullName already exists
-  const existingUser = users.find(u => u.fullName && u.fullName.toLowerCase() === user.fullName.toLowerCase());
+  // Check if user with same fullName AND department already exists
+  // Allow same name in different departments, but block same name+department combination
+  const existingUser = users.find(u => 
+    u.fullName && 
+    u.fullName.toLowerCase() === user.fullName.toLowerCase() &&
+    u.department && 
+    u.department.toLowerCase() === user.department.toLowerCase()
+  );
   if (existingUser) {
-    throw new Error('User with this name already exists');
+    throw new Error('User with this name already exists in this department. Please use a unique identifier or variation (e.g., adding a middle initial, employee ID, or a number) to differentiate your user name.');
   }
 
   const role = getRoleByDepartment(user.department);
@@ -203,17 +228,22 @@ async function writeUser(user) {
   return newUser;
 }
 
-// Find user by credentials
-async function findUserByCredentials(fullName, passwordHash) {
+// Find user by credentials (name and department)
+async function findUserByCredentials(fullName, department) {
   const users = await readUsers();
-  const user = users.find(u => u.fullName.toLowerCase() === fullName.toLowerCase());
+  const user = users.find(u => 
+    u.fullName && 
+    u.fullName.toLowerCase() === fullName.toLowerCase() &&
+    u.department && 
+    u.department.toLowerCase() === department.toLowerCase()
+  );
   
   if (!user) {
     return null;
   }
 
   // Password verification is done in the route handler
-  // This function just finds the user
+  // This function just finds the user by name and department
   return user;
 }
 
@@ -1343,6 +1373,7 @@ async function writeOrder(order) {
       { id: 'amendment_requested_at', title: 'amendment_requested_at' },
       { id: 'last_amended_by_user_id', title: 'last_amended_by_user_id' }, // CRITICAL FIX: Track last amendment user ID
       { id: 'last_amended_timestamp', title: 'last_amended_timestamp' }, // CRITICAL FIX: Track last amendment timestamp
+      { id: 'amendment_history', title: 'amendment_history' }, // Amendment history (JSON array)
       // Original totals before amendment (for approval summary)
       { id: 'original_total_weight', title: 'original_total_weight' },
       { id: 'original_total_invoice_amount', title: 'original_total_invoice_amount' },
@@ -1389,8 +1420,9 @@ async function updateOrderStatus(orderId, newStatus, updateData = {}) {
     ...updateData
   };
   
-  // If status is Completed or Cancelled, free the truck
-  if (newStatus === 'Completed' || newStatus === 'Cancelled') {
+  // If status is Completed or Cancelled, free the truck (case-insensitive check)
+  const normalizedStatus = (newStatus || '').toUpperCase().trim();
+  if (normalizedStatus === 'COMPLETED' || normalizedStatus === 'CANCELLED' || normalizedStatus === 'CANCELED') {
     const vehicleId = orders[orderIndex].vehicle_id;
     if (vehicleId) {
       await updateVehicleStatus(vehicleId, 'Free');
@@ -1429,6 +1461,7 @@ async function updateOrderStatus(orderId, newStatus, updateData = {}) {
       { id: 'amendment_requested_at', title: 'amendment_requested_at' },
       { id: 'last_amended_by_user_id', title: 'last_amended_by_user_id' }, // CRITICAL FIX: Track last amendment user ID
       { id: 'last_amended_timestamp', title: 'last_amended_timestamp' }, // CRITICAL FIX: Track last amendment timestamp
+      { id: 'amendment_history', title: 'amendment_history' }, // Amendment history (JSON array)
       // Original totals before amendment (for approval summary)
       { id: 'original_total_weight', title: 'original_total_weight' },
       { id: 'original_total_invoice_amount', title: 'original_total_invoice_amount' },
@@ -1534,37 +1567,81 @@ const STORES_DEPARTMENTS = [
 ];
 
 // Initialize workflow steps for a segment
+// CRITICAL FIX: Create 6 stages - 3 for origin location, 3 for destination location
 function initializeSegmentWorkflow(segment, location) {
-  const workflowSteps = [
+  const originLocation = segment.source || '';
+  const destinationLocation = segment.destination || '';
+  
+  // Origin location stages (Stages 1-3)
+  const originStages = [
     {
       stage: 'SECURITY_ENTRY',
       status: 'PENDING',
-      location: location || segment.source || '',
+      location: originLocation,
       approved_by: '',
       department: '',
       timestamp: Date.now(),
-      comments: ''
+      comments: '',
+      stage_index: 0 // Position in workflow sequence
     },
     {
       stage: 'STORES_VERIFICATION',
       status: 'PENDING',
-      location: location || segment.destination || '',
+      location: originLocation,
       approved_by: '',
       department: '',
       timestamp: Date.now(),
-      comments: ''
+      comments: '',
+      stage_index: 1
     },
     {
       stage: 'SECURITY_EXIT',
       status: 'PENDING',
-      location: location || segment.destination || '',
+      location: originLocation,
       approved_by: '',
       department: '',
       timestamp: Date.now(),
-      comments: ''
+      comments: '',
+      stage_index: 2
     }
   ];
-  return workflowSteps;
+  
+  // Destination location stages (Stages 4-6)
+  const destinationStages = [
+    {
+      stage: 'SECURITY_ENTRY',
+      status: 'PENDING',
+      location: destinationLocation,
+      approved_by: '',
+      department: '',
+      timestamp: Date.now(),
+      comments: '',
+      stage_index: 3
+    },
+    {
+      stage: 'STORES_VERIFICATION',
+      status: 'PENDING',
+      location: destinationLocation,
+      approved_by: '',
+      department: '',
+      timestamp: Date.now(),
+      comments: '',
+      stage_index: 4
+    },
+    {
+      stage: 'SECURITY_EXIT',
+      status: 'PENDING',
+      location: destinationLocation,
+      approved_by: '',
+      department: '',
+      timestamp: Date.now(),
+      comments: '',
+      stage_index: 5
+    }
+  ];
+  
+  // Combine origin and destination stages (6 total)
+  return [...originStages, ...destinationStages];
 }
 
 // Check if user can perform workflow action
@@ -1616,7 +1693,8 @@ function canPerformWorkflowAction(userDepartment, userRole, stage, action) {
 }
 
 // Check if a workflow stage is currently active (can be approved/rejected)
-function isStageActive(segment, stage, orderStatus) {
+// CRITICAL FIX: Updated to handle 6 stages (3 origin + 3 destination) by position/index
+function isStageActive(segment, stage, orderStatus, location) {
   // Order must be En-Route
   if (orderStatus !== 'En-Route') {
     return false;
@@ -1636,38 +1714,49 @@ function isStageActive(segment, stage, orderStatus) {
     }
   }
 
-  // Find the current stage
-  const currentStage = workflowSteps.find(ws => ws.stage === stage);
+  // Sort workflow steps by stage_index to ensure correct order
+  workflowSteps.sort((a, b) => {
+    const indexA = a.stage_index !== undefined ? a.stage_index : 999;
+    const indexB = b.stage_index !== undefined ? b.stage_index : 999;
+    return indexA - indexB;
+  });
+
+  // Find the current stage by both stage name AND location
+  const currentStage = workflowSteps.find(ws => 
+    ws.stage === stage && 
+    (!location || ws.location === location)
+  );
+  
   if (!currentStage || currentStage.status !== 'PENDING') {
     return false;
   }
 
-  // Check if any prior stage is REJECTED
-  const stageOrder = ['SECURITY_ENTRY', 'STORES_VERIFICATION', 'SECURITY_EXIT'];
-  const currentStageIndex = stageOrder.indexOf(stage);
-  
+  // Get current stage index (0-5 for 6 stages)
+  const currentStageIndex = currentStage.stage_index !== undefined ? currentStage.stage_index : 
+    workflowSteps.indexOf(currentStage);
+
+  // First stage (index 0): Active if order is En-Route and no prior rejection
+  if (currentStageIndex === 0) {
+    return true;
+  }
+
+  // Check if any prior stage is REJECTED (blocking condition)
   for (let i = 0; i < currentStageIndex; i++) {
-    const priorStage = workflowSteps.find(ws => ws.stage === stageOrder[i]);
+    const priorStage = workflowSteps[i];
     if (priorStage && priorStage.status === 'REJECTED') {
       return false;
     }
   }
 
-  // Check sequential activation
-  if (stage === 'SECURITY_ENTRY') {
-    // First stage: Active if order is En-Route and no prior rejection
-    return true;
-  } else if (stage === 'STORES_VERIFICATION') {
-    // Second stage: Active if SECURITY_ENTRY is APPROVED
-    const securityEntry = workflowSteps.find(ws => ws.stage === 'SECURITY_ENTRY');
-    return securityEntry && securityEntry.status === 'APPROVED';
-  } else if (stage === 'SECURITY_EXIT') {
-    // Third stage: Active if STORES_VERIFICATION is APPROVED
-    const storesVerification = workflowSteps.find(ws => ws.stage === 'STORES_VERIFICATION');
-    return storesVerification && storesVerification.status === 'APPROVED';
+  // Sequential activation: Stage N is active only if Stage N-1 is APPROVED
+  const precedingStage = workflowSteps[currentStageIndex - 1];
+  if (!precedingStage) {
+    return false;
   }
 
-  return false;
+  // Current stage is active if preceding stage is APPROVED or COMPLETED
+  const precedingStatus = (precedingStage.status || '').toUpperCase().trim();
+  return precedingStatus === 'APPROVED' || precedingStatus === 'COMPLETED';
 }
 
 // CRITICAL FIX: Check if entire order is rejected (at least one stage in any segment is REJECTED)
@@ -1705,6 +1794,7 @@ function isOrderRejected(order, segments) {
 }
 
 // CRITICAL FIX: Check if entire order is fully completed (all stages in all segments are APPROVED/COMPLETED)
+// Updated to handle 6 stages per segment (3 origin + 3 destination)
 function isOrderCompleted(order, segments) {
   // If order is already rejected, it cannot be completed
   if (isOrderRejected(order, segments)) {
@@ -1741,11 +1831,38 @@ function isOrderCompleted(order, segments) {
       continue;
     }
     
-    // Check if all steps in this segment are APPROVED or COMPLETED
-    for (const step of workflowSteps) {
-      const status = (step.status || '').toUpperCase().trim();
-      if (status !== 'APPROVED' && status !== 'COMPLETED') {
-        return false;
+    // Sort workflow steps by stage_index to ensure correct order
+    workflowSteps.sort((a, b) => {
+      const indexA = a.stage_index !== undefined ? a.stage_index : 999;
+      const indexB = b.stage_index !== undefined ? b.stage_index : 999;
+      return indexA - indexB;
+    });
+    
+    // CRITICAL FIX: Check that all stages are APPROVED or COMPLETED
+    // For new format: expect 6 stages (indices 0-5) per segment
+    // For old format: accept 3 stages (backward compatibility)
+    const expectedStageCount = 6;
+    
+    // If workflow has old format (3 stages), check all 3
+    if (workflowSteps.length < expectedStageCount) {
+      // Old format: check if all existing stages are APPROVED/COMPLETED
+      for (const step of workflowSteps) {
+        const status = (step.status || '').toUpperCase().trim();
+        if (status !== 'APPROVED' && status !== 'COMPLETED') {
+          return false;
+        }
+      }
+    } else {
+      // New format: check all 6 stages (by position/index)
+      for (let i = 0; i < expectedStageCount; i++) {
+        const step = workflowSteps[i];
+        if (!step) {
+          return false;
+        }
+        const status = (step.status || '').toUpperCase().trim();
+        if (status !== 'APPROVED' && status !== 'COMPLETED') {
+          return false;
+        }
       }
     }
   }
@@ -1950,6 +2067,7 @@ async function getUnreadNotificationCount(department) {
 }
 
 module.exports = {
+  getISTTimestamp,
   initializeCsvFile,
   readUsers,
   writeUser,

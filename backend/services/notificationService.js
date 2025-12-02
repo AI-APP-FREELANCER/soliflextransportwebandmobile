@@ -114,7 +114,7 @@ async function createNotification(orderId, recipientDepartment, notificationType
     notificationType: notificationType,
     message: message,
     status: 'unread',
-    createdAt: new Date().toISOString(),
+    createdAt: csvService.getISTTimestamp(),
     relatedUserId: relatedUserId
   });
 }

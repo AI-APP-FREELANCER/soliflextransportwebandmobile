@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../models/order_model.dart';
 import '../models/trip_segment_model.dart';
 import '../models/workflow_step_model.dart';
+import '../models/vehicle_model.dart';
 import '../providers/auth_provider.dart';
 import '../services/order_workflow_service.dart';
 import '../services/api_service.dart';
@@ -28,13 +29,45 @@ class _WorkflowScreenState extends State<WorkflowScreen> {
   bool _isLoading = true;
   String? _error;
   bool _isProcessing = false;
+  List<VehicleModel> _vehicles = [];
+  String? _vehicleType;
 
   @override
   void initState() {
     super.initState();
     _loadOrder();
+    _loadVehicles();
     // CRITICAL FIX: Set up optimized periodic refresh to prevent flickering
     _startPeriodicRefresh();
+  }
+
+  Future<void> _loadVehicles() async {
+    try {
+      final result = await _apiService.getVehicles();
+      if (result['success'] == true && result['vehicles'] != null) {
+        setState(() {
+          _vehicles = result['vehicles'] as List<VehicleModel>;
+          // Find vehicle type for the order's vehicle
+          if (_order?.vehicleNumber != null && _order!.vehicleNumber!.isNotEmpty) {
+            final vehicle = _vehicles.firstWhere(
+              (v) => v.vehicleNumber == _order!.vehicleNumber,
+              orElse: () => VehicleModel(
+                vehicleId: '',
+                vehicleNumber: _order!.vehicleNumber ?? '',
+                type: '',
+                capacityKg: 0,
+                vehicleType: 'Unknown',
+                vendorVehicle: '',
+                isBusy: false,
+              ),
+            );
+            _vehicleType = vehicle.vehicleType.isNotEmpty ? vehicle.vehicleType : vehicle.type.isNotEmpty ? vehicle.type : 'Unknown';
+          }
+        });
+      }
+    } catch (e) {
+      print('Error loading vehicles: $e');
+    }
   }
   
   @override
@@ -82,6 +115,22 @@ class _WorkflowScreenState extends State<WorkflowScreen> {
             _lastOrderStatus = newOrder.orderStatus;
             _lastWorkflowHash = workflowHash;
             _lastRefreshTime = DateTime.now();
+            // Update vehicle type if vehicle number changed
+            if (newOrder.vehicleNumber != null && newOrder.vehicleNumber!.isNotEmpty && _vehicles.isNotEmpty) {
+              final vehicle = _vehicles.firstWhere(
+                (v) => v.vehicleNumber == newOrder.vehicleNumber,
+                orElse: () => VehicleModel(
+                  vehicleId: '',
+                  vehicleNumber: newOrder.vehicleNumber ?? '',
+                  type: '',
+                  capacityKg: 0,
+                  vehicleType: 'Unknown',
+                  vendorVehicle: '',
+                  isBusy: false,
+                ),
+              );
+              _vehicleType = vehicle.vehicleType.isNotEmpty ? vehicle.vehicleType : vehicle.type.isNotEmpty ? vehicle.type : 'Unknown';
+            }
           });
         }
       }
@@ -100,10 +149,14 @@ class _WorkflowScreenState extends State<WorkflowScreen> {
     try {
       final result = await _apiService.getOrderById(widget.orderId);
       if (result['success'] == true && result['order'] != null) {
+        final loadedOrder = result['order'] as OrderModel;
         setState(() {
-          _order = result['order'] as OrderModel;
+          _order = loadedOrder;
           _isLoading = false;
+          _error = null;
         });
+        // Load vehicles and update vehicle type after order is loaded
+        await _loadVehicles();
       } else {
         setState(() {
           _error = result['message'] ?? 'Failed to load order';
@@ -122,8 +175,9 @@ class _WorkflowScreenState extends State<WorkflowScreen> {
     TripSegment segment,
     String stage,
     String action,
-    String? comments,
-  ) async {
+    String? comments, {
+    String? location,
+  }) async {
     if (_order == null) return;
 
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
@@ -143,6 +197,17 @@ class _WorkflowScreenState extends State<WorkflowScreen> {
     });
 
     try {
+      // Find workflow step to get location if not provided
+      String? workflowLocation = location;
+      if (workflowLocation == null) {
+        final matchingSteps = segment.workflow.where((ws) => ws.stage == stage);
+        if (matchingSteps.isNotEmpty) {
+          workflowLocation = matchingSteps.first.location;
+        } else {
+          workflowLocation = segment.source;
+        }
+      }
+      
       final result = await _workflowService.performWorkflowAction(
         orderId: _order!.orderId,
         segmentId: segment.segmentId,
@@ -150,6 +215,7 @@ class _WorkflowScreenState extends State<WorkflowScreen> {
         action: action,
         userId: user.userId,
         comments: comments,
+        location: workflowLocation,
       );
 
       if (result['success'] == true) {
@@ -317,6 +383,15 @@ class _WorkflowScreenState extends State<WorkflowScreen> {
                                 color: AppTheme.textSecondary,
                               ),
                             ),
+                            if (_vehicleType != null && _vehicleType!.isNotEmpty && _vehicleType != 'Unknown')
+                              Text(
+                                'Vehicle Type: $_vehicleType',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppTheme.primaryOrange,
+                                ),
+                              ),
                           ],
                         ),
                       ),
@@ -388,12 +463,28 @@ class _WorkflowScreenState extends State<WorkflowScreen> {
               ],
             ),
             const SizedBox(height: 8),
-            Text(
-              '${segment.source} → ${segment.destination}',
-              style: TextStyle(
-                fontSize: 16,
-                color: AppTheme.textSecondary,
-              ),
+            // CRITICAL FIX: Display complete route with "From [Source] To [Destination]" format
+            Row(
+              children: [
+                Icon(Icons.location_on, size: 16, color: AppTheme.primaryOrange),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    segment.source.isNotEmpty && segment.destination.isNotEmpty
+                        ? 'From ${segment.source} To ${segment.destination}'
+                        : segment.source.isNotEmpty
+                            ? 'From ${segment.source}'
+                            : segment.destination.isNotEmpty
+                                ? 'To ${segment.destination}'
+                                : 'Route not specified',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w500,
+                      color: AppTheme.textPrimary,
+                    ),
+                  ),
+                ),
+              ],
             ),
             Text(
               'Weight: ${segment.materialWeight} kg',
@@ -415,28 +506,79 @@ class _WorkflowScreenState extends State<WorkflowScreen> {
             ),
             const SizedBox(height: 12),
 
-            // SECURITY_ENTRY
-            _buildStageCard(
-              segment,
-              'SECURITY_ENTRY',
-              userDepartment,
-              userRole,
-            ),
-            
-            // STORES_VERIFICATION
-            _buildStageCard(
-              segment,
-              'STORES_VERIFICATION',
-              userDepartment,
-              userRole,
-            ),
-            
-            // SECURITY_EXIT
-            _buildStageCard(
-              segment,
-              'SECURITY_EXIT',
-              userDepartment,
-              userRole,
+            // CRITICAL FIX: Group stages by location (Origin first, then Destination)
+            Builder(
+              builder: (context) {
+                // Sort workflow steps by stage_index to ensure correct order
+                final sortedSteps = List<WorkflowStep>.from(segment.workflow);
+                sortedSteps.sort((a, b) {
+                  final indexA = a.stageIndex ?? 999;
+                  final indexB = b.stageIndex ?? 999;
+                  return indexA.compareTo(indexB);
+                });
+
+                // Group stages by location
+                final originLocation = segment.source.isNotEmpty ? segment.source : 'Origin';
+                final destinationLocation = segment.destination.isNotEmpty ? segment.destination : 'Destination';
+                
+                // Origin stages (indices 0-2)
+                final originStages = sortedSteps.where((ws) {
+                  final index = ws.stageIndex ?? 999;
+                  return index < 3 || (ws.location == originLocation && index == 999);
+                }).toList();
+                
+                // Destination stages (indices 3-5)
+                final destinationStages = sortedSteps.where((ws) {
+                  final index = ws.stageIndex ?? 999;
+                  return index >= 3 || (ws.location == destinationLocation && index == 999);
+                }).toList();
+
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Display Origin stages
+                    if (originStages.isNotEmpty) ...[
+                      Text(
+                        'Origin: $originLocation',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: AppTheme.primaryOrange,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      ...originStages.map((step) => _buildStageCard(
+                        segment,
+                        step.stage,
+                        userDepartment,
+                        userRole,
+                        location: step.location,
+                      )),
+                      const SizedBox(height: 16),
+                    ],
+
+                    // Display Destination stages
+                    if (destinationStages.isNotEmpty) ...[
+                      Text(
+                        'Destination: $destinationLocation',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: AppTheme.primaryOrange,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      ...destinationStages.map((step) => _buildStageCard(
+                        segment,
+                        step.stage,
+                        userDepartment,
+                        userRole,
+                        location: step.location,
+                      )),
+                    ],
+                  ],
+                );
+              },
             ),
           ],
         ),
@@ -448,22 +590,33 @@ class _WorkflowScreenState extends State<WorkflowScreen> {
     TripSegment segment,
     String stage,
     String userDepartment,
-    String userRole,
-  ) {
+    String userRole, {
+    String? location,
+  }) {
     if (_order == null) return const SizedBox.shrink();
 
-    // Find workflow step (use where().isNotEmpty pattern for safety)
+    // CRITICAL FIX: Find workflow step by both stage name AND location
+    // This is necessary because we now have 6 stages (3 origin + 3 destination) with same stage names
     WorkflowStep workflowStep;
-    final matchingSteps = segment.workflow.where((ws) => ws.stage == stage);
+    final matchingSteps = segment.workflow.where((ws) => 
+      ws.stage == stage && 
+      (location == null || ws.location == location)
+    );
     if (matchingSteps.isNotEmpty) {
       workflowStep = matchingSteps.first;
     } else {
-      workflowStep = WorkflowStep(
-        stage: stage,
-        status: 'PENDING',
-        location: segment.source,
-        timestamp: DateTime.now().millisecondsSinceEpoch,
-      );
+      // Fallback: try to find by stage name only (for backward compatibility)
+      final fallbackSteps = segment.workflow.where((ws) => ws.stage == stage);
+      if (fallbackSteps.isNotEmpty) {
+        workflowStep = fallbackSteps.first;
+      } else {
+        workflowStep = WorkflowStep(
+          stage: stage,
+          status: 'PENDING',
+          location: location ?? segment.source,
+          timestamp: DateTime.now().millisecondsSinceEpoch,
+        );
+      }
     }
 
     final canPerformAction = _workflowService.canPerformAction(
@@ -477,6 +630,7 @@ class _WorkflowScreenState extends State<WorkflowScreen> {
       segment,
       stage,
       _order!.orderStatus,
+      location: location ?? workflowStep.location,
     );
 
     final isRejected = workflowStep.status == 'REJECTED';
@@ -487,12 +641,16 @@ class _WorkflowScreenState extends State<WorkflowScreen> {
       'REVOKE',
     );
 
-    final canCancel = _workflowService.canPerformAction(
+    final canCancelPermission = _workflowService.canPerformAction(
       userDepartment,
       userRole,
       stage,
       'CANCEL',
     );
+    
+    // Block cancellation if order is fully completed
+    final isOrderFullyCompleted = _workflowService.isOrderCompleted(_order!);
+    final canCancel = canCancelPermission && !isOrderFullyCompleted;
 
     // CRITICAL FIX: Enhanced debug logging to diagnose button visibility
     print('[Workflow Screen] ========================================');
@@ -530,7 +688,7 @@ class _WorkflowScreenState extends State<WorkflowScreen> {
       canRevoke: canRevoke,
       canCancel: canCancel,
       onAction: (action, comments) {
-        _handleWorkflowAction(segment, stage, action, comments);
+        _handleWorkflowAction(segment, stage, action, comments, location: location ?? workflowStep.location);
       },
     );
   }

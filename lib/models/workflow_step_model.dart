@@ -8,6 +8,7 @@ class WorkflowStep {
   final String? department; // Department of user who approved/rejected
   final int timestamp; // Milliseconds since epoch
   final String? comments; // Optional comments
+  final int? stageIndex; // Position in workflow sequence (0-5 for 6 stages)
 
   WorkflowStep({
     required this.stage,
@@ -17,6 +18,7 @@ class WorkflowStep {
     this.department,
     required this.timestamp,
     this.comments,
+    this.stageIndex,
   });
 
   factory WorkflowStep.fromJson(Map<String, dynamic> json) {
@@ -30,6 +32,11 @@ class WorkflowStep {
           ? json['timestamp']
           : int.tryParse(json['timestamp']?.toString() ?? '0') ?? 0,
       comments: json['comments']?.toString(),
+      stageIndex: json['stage_index'] != null
+          ? (json['stage_index'] is int
+              ? json['stage_index']
+              : int.tryParse(json['stage_index'].toString()) ?? null)
+          : null,
     );
   }
 
@@ -42,6 +49,7 @@ class WorkflowStep {
       if (department != null) 'department': department,
       'timestamp': timestamp,
       if (comments != null) 'comments': comments,
+      if (stageIndex != null) 'stage_index': stageIndex,
     };
   }
 
@@ -53,6 +61,7 @@ class WorkflowStep {
     String? department,
     int? timestamp,
     String? comments,
+    int? stageIndex,
   }) {
     return WorkflowStep(
       stage: stage ?? this.stage,
@@ -62,6 +71,7 @@ class WorkflowStep {
       department: department ?? this.department,
       timestamp: timestamp ?? this.timestamp,
       comments: comments ?? this.comments,
+      stageIndex: stageIndex ?? this.stageIndex,
     );
   }
 

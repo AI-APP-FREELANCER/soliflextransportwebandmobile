@@ -58,7 +58,7 @@ router.post('/register', async (req, res) => {
       }
     });
   } catch (error) {
-    if (error.message === 'User with this name already exists') {
+    if (error.message && error.message.includes('User with this name already exists in this department')) {
       return res.status(409).json({
         success: false,
         message: error.message
@@ -75,18 +75,27 @@ router.post('/register', async (req, res) => {
 // POST /api/login
 router.post('/login', async (req, res) => {
   try {
-    const { fullName, password } = req.body;
+    const { fullName, password, department } = req.body;
 
     // Validation
-    if (!fullName || !password) {
+    if (!fullName || !password || !department) {
       return res.status(400).json({
         success: false,
-        message: 'Full Name and Password are required'
+        message: 'Full Name, Password, and Department are required'
       });
     }
 
-    // Find user
-    const user = await csvService.findUserByCredentials(fullName);
+    // Validate department
+    const departments = csvService.getDepartments();
+    if (!departments.includes(department)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid department'
+      });
+    }
+
+    // Find user by name and department
+    const user = await csvService.findUserByCredentials(fullName, department);
     
     if (!user) {
       return res.status(401).json({

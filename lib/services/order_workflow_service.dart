@@ -50,6 +50,7 @@ class OrderWorkflowService {
     required String action,
     required String userId,
     String? comments,
+    String? location,
   }) async {
     try {
       return await _apiService.performWorkflowAction(
@@ -59,6 +60,7 @@ class OrderWorkflowService {
         action: action,
         userId: userId,
         comments: comments,
+        location: location,
       );
     } catch (e) {
       return {
@@ -220,11 +222,13 @@ class OrderWorkflowService {
   }
 
   // Check if a workflow stage is currently active (client-side sequential activation check)
-  bool isStageActive(TripSegment segment, String stage, String orderStatus) {
+  // CRITICAL FIX: Updated to handle 6 stages (3 origin + 3 destination) by position/index
+  bool isStageActive(TripSegment segment, String stage, String orderStatus, {String? location}) {
     // CRITICAL FIX: Add explicit logging for stage activation
     print('[isStageActive] ========================================');
     print('[isStageActive] Checking stage activation:');
     print('  Stage: "$stage"');
+    print('  Location: "$location"');
     print('  Order Status: "$orderStatus"');
     print('  Segment ID: ${segment.segmentId}');
     
@@ -239,19 +243,37 @@ class OrderWorkflowService {
     final workflowSteps = segment.workflow;
     print('  Workflow Steps Count: ${workflowSteps.length}');
 
-    // Find the current stage (use where().isNotEmpty pattern)
+    // Sort workflow steps by stage_index to ensure correct order
+    final sortedSteps = List<WorkflowStep>.from(workflowSteps);
+    sortedSteps.sort((a, b) {
+      final indexA = a.stageIndex ?? 999;
+      final indexB = b.stageIndex ?? 999;
+      return indexA.compareTo(indexB);
+    });
+
+    // Find the current stage by both stage name AND location
     WorkflowStep? currentStage;
-    final matchingSteps = workflowSteps.where((ws) => ws.stage == stage);
-    currentStage = matchingSteps.isNotEmpty ? matchingSteps.first : null;
+    if (location != null && location.isNotEmpty) {
+      currentStage = sortedSteps.firstWhere(
+        (ws) => ws.stage == stage && ws.location == location,
+        orElse: () => sortedSteps.firstWhere(
+          (ws) => ws.stage == stage,
+          orElse: () => sortedSteps.first,
+        ),
+      );
+    } else {
+      final matchingSteps = sortedSteps.where((ws) => ws.stage == stage);
+      currentStage = matchingSteps.isNotEmpty ? matchingSteps.first : null;
+    }
 
     if (currentStage == null) {
       print('  [FAIL] Current stage not found in workflow steps');
-      print('  Available stages: ${workflowSteps.map((ws) => ws.stage).join(', ')}');
+      print('  Available stages: ${sortedSteps.map((ws) => '${ws.stage}@${ws.location}').join(', ')}');
       print('[isStageActive] ========================================');
       return false;
     }
     
-    print('  Current Stage Found: ${currentStage.stage}, Status: ${currentStage.status}');
+    print('  Current Stage Found: ${currentStage.stage}@${currentStage.location}, Status: ${currentStage.status}, Index: ${currentStage.stageIndex}');
     
     if (currentStage.status != 'PENDING') {
       print('  [FAIL] Current stage status is not PENDING: ${currentStage.status}');
@@ -259,89 +281,60 @@ class OrderWorkflowService {
       return false;
     }
 
-    // CRITICAL FIX: Sequential activation logic
-    // Stage is active ONLY if:
-    // 1. Current stage status is PENDING
-    // 2. All prior stages are APPROVED or COMPLETED (not PENDING or REJECTED)
-    // 3. No prior stages are REJECTED
-    
-    const stageOrder = ['SECURITY_ENTRY', 'STORES_VERIFICATION', 'SECURITY_EXIT'];
-    final normalizedStage = stage.trim().toUpperCase();
-    final currentStageIndex = stageOrder.indexOf(normalizedStage);
-    
-    if (currentStageIndex == -1) {
-      print('  [FAIL] Stage not found in stageOrder: "$normalizedStage"');
-      print('  Available stages in order: ${stageOrder.join(', ')}');
-      print('[isStageActive] ========================================');
-      return false;
-    }
+    // Get current stage index (0-5 for 6 stages)
+    final currentStageIndex = currentStage.stageIndex ?? sortedSteps.indexOf(currentStage);
     
     print('  Current Stage Index: $currentStageIndex');
 
+    // First stage (index 0): Active if order is En-Route, stage is PENDING, and no prior rejections
+    if (currentStageIndex == 0) {
+      print('  [FIRST STAGE] Origin SECURITY_ENTRY - always active if PENDING (no prior stages)');
+      print('[isStageActive] ========================================');
+      return true;
+    }
+
     // Check if any prior stage is REJECTED (blocking condition)
     for (int i = 0; i < currentStageIndex; i++) {
-      final priorStageName = stageOrder[i];
-      final matchingPriorSteps = workflowSteps.where((ws) => ws.stage == priorStageName);
-      final priorStage = matchingPriorSteps.isNotEmpty ? matchingPriorSteps.first : null;
-      print('  Checking prior stage $i: $priorStageName - Status: ${priorStage?.status ?? 'NOT FOUND'}');
-      
-      if (priorStage != null && priorStage.status == 'REJECTED') {
-        print('  [FAIL] Prior stage $priorStageName is REJECTED - blocking activation');
-        print('[isStageActive] ========================================');
-        return false;
+      if (i < sortedSteps.length) {
+        final priorStage = sortedSteps[i];
+        print('  Checking prior stage $i: ${priorStage.stage}@${priorStage.location} - Status: ${priorStage.status}');
+        
+        if (priorStage.status == 'REJECTED') {
+          print('  [FAIL] Prior stage ${priorStage.stage}@${priorStage.location} is REJECTED - blocking activation');
+          print('[isStageActive] ========================================');
+          return false;
+        }
       }
     }
     
     print('  [PASS] No prior stages are REJECTED');
     
-    print('  Normalized Stage: "$normalizedStage"');
-    print('  Current Stage Index: $currentStageIndex');
-    
-    // CRITICAL FIX: First stage (index 0) is always active if PENDING and no prior rejections
-    if (currentStageIndex == 0) {
-      // First stage: Active if order is En-Route, stage is PENDING, and no prior rejections
-      print('  [SECURITY_ENTRY] First stage - always active if PENDING (no prior stages)');
-      print('[isStageActive] ========================================');
-      return true;
-    }
-    
-    // CRITICAL FIX: For subsequent stages, check if immediately preceding stage is APPROVED or COMPLETED
-    final precedingStageName = stageOrder[currentStageIndex - 1];
-    final matchingPrecedingSteps = workflowSteps.where((ws) => ws.stage == precedingStageName);
-    final precedingStage = matchingPrecedingSteps.isNotEmpty ? matchingPrecedingSteps.first : null;
-    
-    print('  Checking preceding stage: $precedingStageName');
-    print('  Preceding stage found: ${precedingStage != null}');
-    if (precedingStage != null) {
+    // Sequential activation: Stage N is active only if Stage N-1 is APPROVED
+    if (currentStageIndex > 0 && currentStageIndex - 1 < sortedSteps.length) {
+      final precedingStage = sortedSteps[currentStageIndex - 1];
+      
+      print('  Checking preceding stage: ${precedingStage.stage}@${precedingStage.location}');
       print('  Preceding stage status: "${precedingStage.status}"');
-      print('  Preceding stage object: ${precedingStage.toString()}');
-    } else {
-      print('  Preceding stage status: NOT FOUND');
-      print('  Available workflow steps: ${workflowSteps.map((ws) => '${ws.stage}:${ws.status}').join(', ')}');
-    }
-    
-    if (precedingStage == null) {
-      print('  [FAIL] Preceding stage $precedingStageName not found in workflow steps');
-      print('  Available stages in workflow: ${workflowSteps.map((ws) => ws.stage).join(', ')}');
+      
+      // Current stage is active ONLY if preceding stage is APPROVED or COMPLETED
+      final precedingStatus = precedingStage.status.trim().toUpperCase();
+      final isPrecedingApproved = precedingStatus == 'APPROVED' || precedingStatus == 'COMPLETED';
+      final currentStatus = currentStage.status.trim().toUpperCase();
+      final isCurrentPending = currentStatus == 'PENDING';
+      final isActive = isPrecedingApproved && isCurrentPending;
+      
+      print('  Preceding stage status (normalized): "$precedingStatus"');
+      print('  Preceding stage is APPROVED/COMPLETED: $isPrecedingApproved');
+      print('  Current stage status (normalized): "$currentStatus"');
+      print('  Current stage is PENDING: $isCurrentPending');
+      print('  [${currentStage.stage}@${currentStage.location}] Final Result: $isActive');
       print('[isStageActive] ========================================');
-      return false;
+      return isActive;
     }
     
-    // CRITICAL FIX: Current stage is active ONLY if preceding stage is APPROVED or COMPLETED
-    // Normalize status comparison for robustness
-    final precedingStatus = precedingStage.status.trim().toUpperCase();
-    final isPrecedingApproved = precedingStatus == 'APPROVED' || precedingStatus == 'COMPLETED';
-    final currentStatus = currentStage.status.trim().toUpperCase();
-    final isCurrentPending = currentStatus == 'PENDING';
-    final isActive = isPrecedingApproved && isCurrentPending;
-    
-    print('  Preceding stage status (normalized): "$precedingStatus"');
-    print('  Preceding stage is APPROVED/COMPLETED: $isPrecedingApproved');
-    print('  Current stage status (normalized): "$currentStatus"');
-    print('  Current stage is PENDING: $isCurrentPending');
-    print('  [${normalizedStage}] Final Result: $isActive');
+    print('  [FAIL] Preceding stage not found');
     print('[isStageActive] ========================================');
-    return isActive;
+    return false;
   }
 
   // ====================================================================

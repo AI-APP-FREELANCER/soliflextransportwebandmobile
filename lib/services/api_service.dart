@@ -79,6 +79,7 @@ class ApiService {
   Future<Map<String, dynamic>> login({
     required String fullName,
     required String password,
+    required String department,
   }) async {
     try {
       final response = await http.post(
@@ -87,6 +88,7 @@ class ApiService {
         body: jsonEncode({
           'fullName': fullName,
           'password': password,
+          'department': department,
         }),
       );
 
@@ -881,6 +883,7 @@ class ApiService {
     required String action,
     required String userId,
     String? comments,
+    String? location,
   }) async {
     try {
       final response = await http.post(
@@ -893,6 +896,7 @@ class ApiService {
           'action': action,
           'userId': userId,
           'comments': comments,
+          if (location != null) 'location': location,
         }),
       );
 

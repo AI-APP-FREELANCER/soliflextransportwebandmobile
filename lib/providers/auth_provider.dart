@@ -84,6 +84,7 @@ class AuthProvider with ChangeNotifier {
   Future<bool> login({
     required String fullName,
     required String password,
+    required String department,
   }) async {
     _isLoading = true;
     _error = null;
@@ -93,6 +94,7 @@ class AuthProvider with ChangeNotifier {
       final result = await _apiService.login(
         fullName: fullName,
         password: password,
+        department: department,
       );
 
       if (result['success'] == true && result['user'] != null) {

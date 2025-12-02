@@ -386,34 +386,39 @@ class _WorkflowStageCardState extends State<WorkflowStageCard> {
                 padding: const EdgeInsets.only(top: 8.0),
                 child: SizedBox(
                   width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed: () {
-                      showDialog(
-                        context: context,
-                        builder: (context) => AlertDialog(
-                          title: const Text('Cancel Order'),
-                          content: const Text('Are you sure you want to cancel this order?'),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.pop(context),
-                              child: const Text('No'),
-                            ),
-                            TextButton(
-                              onPressed: () {
-                                Navigator.pop(context);
-                                widget.onAction('CANCEL', 'Order canceled by admin');
-                              },
-                              child: const Text('Yes'),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                    icon: const Icon(Icons.cancel),
-                    label: const Text('Cancel order at this stage'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.red.shade900,
-                      foregroundColor: Colors.white,
+                  child: Tooltip(
+                    message: widget.canCancel 
+                        ? 'Cancel this order at this stage'
+                        : 'Order cannot be cancelled after all approval stages have been completed',
+                    child: ElevatedButton.icon(
+                      onPressed: widget.canCancel ? () {
+                        showDialog(
+                          context: context,
+                          builder: (context) => AlertDialog(
+                            title: const Text('Cancel Order'),
+                            content: const Text('Are you sure you want to cancel this order?'),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.pop(context),
+                                child: const Text('No'),
+                              ),
+                              TextButton(
+                                onPressed: () {
+                                  Navigator.pop(context);
+                                  widget.onAction('CANCEL', 'Order canceled by admin');
+                                },
+                                child: const Text('Yes'),
+                              ),
+                            ],
+                          ),
+                        );
+                      } : null,
+                      icon: const Icon(Icons.cancel),
+                      label: const Text('Cancel order at this stage'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: widget.canCancel ? Colors.red.shade900 : Colors.grey,
+                        foregroundColor: Colors.white,
+                      ),
                     ),
                   ),
                 ),

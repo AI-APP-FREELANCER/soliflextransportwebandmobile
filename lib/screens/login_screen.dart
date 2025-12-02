@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
+import '../providers/department_provider.dart';
 import '../theme/app_theme.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -14,7 +15,17 @@ class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _fullNameController = TextEditingController();
   final _passwordController = TextEditingController();
+  String? _selectedDepartment;
   bool _obscurePassword = true;
+
+  @override
+  void initState() {
+    super.initState();
+    // Load departments when screen initializes
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Provider.of<DepartmentProvider>(context, listen: false).loadDepartments();
+    });
+  }
 
   @override
   void dispose() {
@@ -28,10 +39,21 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
 
+    if (_selectedDepartment == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please select a department'),
+          backgroundColor: AppTheme.errorRed,
+        ),
+      );
+      return;
+    }
+
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     final success = await authProvider.login(
       fullName: _fullNameController.text.trim(),
       password: _passwordController.text,
+      department: _selectedDepartment!,
     );
 
     if (!mounted) return;
@@ -98,6 +120,37 @@ class _LoginScreenState extends State<LoginScreen> {
                     return null;
                   },
                   textCapitalization: TextCapitalization.words,
+                ),
+                const SizedBox(height: 20),
+                // Department Dropdown
+                Consumer<DepartmentProvider>(
+                  builder: (context, departmentProvider, child) {
+                    return DropdownButtonFormField<String>(
+                      value: _selectedDepartment,
+                      decoration: const InputDecoration(
+                        labelText: 'Department *',
+                        hintText: 'Select your department',
+                        prefixIcon: Icon(Icons.business),
+                      ),
+                      items: departmentProvider.departments.map((dept) {
+                        return DropdownMenuItem(
+                          value: dept,
+                          child: Text(dept),
+                        );
+                      }).toList(),
+                      onChanged: (value) {
+                        setState(() {
+                          _selectedDepartment = value;
+                        });
+                      },
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return 'Department is required';
+                        }
+                        return null;
+                      },
+                    );
+                  },
                 ),
                 const SizedBox(height: 20),
                 // Password Field

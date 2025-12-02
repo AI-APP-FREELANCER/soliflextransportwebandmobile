@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import '../models/order_model.dart';
 import '../models/trip_segment_model.dart';
+import '../models/vehicle_model.dart';
+import '../services/api_service.dart';
 import '../theme/app_theme.dart';
 
-class ApprovalSummaryModal extends StatelessWidget {
+class ApprovalSummaryModal extends StatefulWidget {
   final OrderModel order;
   final VoidCallback onApprove;
 
@@ -14,43 +16,96 @@ class ApprovalSummaryModal extends StatelessWidget {
   });
 
   @override
+  State<ApprovalSummaryModal> createState() => _ApprovalSummaryModalState();
+}
+
+class _ApprovalSummaryModalState extends State<ApprovalSummaryModal> {
+  final ApiService _apiService = ApiService();
+  List<VehicleModel> _vehicles = [];
+  String? _vehicleType;
+  bool _isLoadingVehicles = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadVehicles();
+  }
+
+  Future<void> _loadVehicles() async {
+    try {
+      final result = await _apiService.getVehicles();
+      if (result['success'] == true && result['vehicles'] != null) {
+        setState(() {
+          _vehicles = result['vehicles'] as List<VehicleModel>;
+          // Find vehicle type for the order's vehicle
+          if (widget.order.vehicleNumber != null && widget.order.vehicleNumber!.isNotEmpty) {
+            final vehicle = _vehicles.firstWhere(
+              (v) => v.vehicleNumber == widget.order.vehicleNumber,
+              orElse: () => VehicleModel(
+                vehicleId: '',
+                vehicleNumber: widget.order.vehicleNumber ?? '',
+                type: '',
+                capacityKg: 0,
+                vehicleType: 'Unknown',
+                vendorVehicle: '',
+                isBusy: false,
+              ),
+            );
+            _vehicleType = vehicle.vehicleType.isNotEmpty ? vehicle.vehicleType : vehicle.type.isNotEmpty ? vehicle.type : 'Unknown';
+          }
+          _isLoadingVehicles = false;
+        });
+      } else {
+        setState(() {
+          _isLoadingVehicles = false;
+        });
+      }
+    } catch (e) {
+      print('Error loading vehicles: $e');
+      setState(() {
+        _isLoadingVehicles = false;
+      });
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     // Get original totals from stored values (if available) or calculate from segments
-    final originalTotalWeight = order.originalTotalWeight ?? 0;
-    final originalTotalInvoice = order.originalTotalInvoiceAmount ?? 0;
-    final originalTotalToll = order.originalTotalTollCharges ?? 0;
-    final originalSegmentCount = order.originalSegmentCount ?? order.tripSegments.length;
+    final originalTotalWeight = widget.order.originalTotalWeight ?? 0;
+    final originalTotalInvoice = widget.order.originalTotalInvoiceAmount ?? 0;
+    final originalTotalToll = widget.order.originalTotalTollCharges ?? 0;
+    final originalSegmentCount = widget.order.originalSegmentCount ?? widget.order.tripSegments.length;
     
     // Calculate projected totals (after amendment) - these are the current totals
-    final projectedTotalWeight = order.getTotalWeight();
-    final projectedTotalInvoice = order.getTotalInvoiceAmount();
-    final projectedTotalToll = order.getTotalTollCharges();
+    final projectedTotalWeight = widget.order.getTotalWeight();
+    final projectedTotalInvoice = widget.order.getTotalInvoiceAmount();
+    final projectedTotalToll = widget.order.getTotalTollCharges();
     
     // If no stored original segment count, use heuristic based on trip type
     final List<TripSegment> displayNewSegments;
-    if (order.originalSegmentCount != null && order.originalSegmentCount! > 0) {
+    if (widget.order.originalSegmentCount != null && widget.order.originalSegmentCount! > 0) {
       // Use stored original segment count - identify new segments by segment_id > originalSegmentCount
-      displayNewSegments = order.tripSegments.where((s) => 
-        s.segmentId != null && s.segmentId! > order.originalSegmentCount!
+      displayNewSegments = widget.order.tripSegments.where((s) => 
+        s.segmentId != null && s.segmentId! > widget.order.originalSegmentCount!
       ).toList();
-    } else if (order.originalTripType == 'Round-Trip-Vendor' && order.tripSegments.length > 2) {
+    } else if (widget.order.originalTripType == 'Round-Trip-Vendor' && widget.order.tripSegments.length > 2) {
       // Round Trip: Original had 2 segments, new ones are 3+
-      displayNewSegments = order.tripSegments.sublist(2);
+      displayNewSegments = widget.order.tripSegments.sublist(2);
     } else {
       // For other types, show all segments (fallback)
-      displayNewSegments = order.tripSegments;
+      displayNewSegments = widget.order.tripSegments;
     }
 
     // Format amendment timestamp
     String formattedAmendmentDate = 'N/A';
-    if (order.amendmentRequestedAt != null) {
-      final date = order.amendmentRequestedAt!;
+    if (widget.order.amendmentRequestedAt != null) {
+      final date = widget.order.amendmentRequestedAt!;
       formattedAmendmentDate = '${date.day}/${date.month}/${date.year} ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
     }
 
     // Identify new segments (last N segments that were added)
     // We'll identify this by segment count - for now, show all segments
-    final newSegments = order.tripSegments; // All segments for display
+    final newSegments = widget.order.tripSegments; // All segments for display
 
     return Dialog(
       backgroundColor: AppTheme.darkCard,
@@ -100,12 +155,30 @@ class ApprovalSummaryModal extends StatelessWidget {
                     children: [
                       const Icon(Icons.receipt_long, color: AppTheme.primaryOrange, size: 24),
                       const SizedBox(width: 12),
-                      Text(
-                        'Order ID: ${order.orderId}',
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: AppTheme.textPrimary,
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Order ID: ${widget.order.orderId}',
+                              style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: AppTheme.textPrimary,
+                              ),
+                            ),
+                            if (_vehicleType != null && _vehicleType!.isNotEmpty && _vehicleType != 'Unknown') ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                'Vehicle Type: $_vehicleType',
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppTheme.primaryOrange,
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
                       ),
                     ],
@@ -228,12 +301,28 @@ class ApprovalSummaryModal extends StatelessWidget {
                                       ),
                                     ),
                                     const SizedBox(height: 6),
-                                    Text(
-                                      '${segment.source} → ${segment.destination}',
-                                      style: const TextStyle(
-                                        fontSize: 13,
-                                        color: AppTheme.textPrimary,
-                                      ),
+                                    // CRITICAL FIX: Display complete route with "From [Source] To [Destination]" format
+                                    Row(
+                                      children: [
+                                        Icon(Icons.location_on, size: 14, color: AppTheme.primaryOrange),
+                                        const SizedBox(width: 4),
+                                        Expanded(
+                                          child: Text(
+                                            segment.source.isNotEmpty && segment.destination.isNotEmpty
+                                                ? 'From ${segment.source} To ${segment.destination}'
+                                                : segment.source.isNotEmpty
+                                                    ? 'From ${segment.source}'
+                                                    : segment.destination.isNotEmpty
+                                                        ? 'To ${segment.destination}'
+                                                        : 'Route not specified',
+                                            style: const TextStyle(
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.w500,
+                                              color: AppTheme.textPrimary,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                     const SizedBox(height: 4),
                                     Text(
@@ -339,9 +428,11 @@ class ApprovalSummaryModal extends StatelessWidget {
                         ],
                       ),
                       const SizedBox(height: 16),
-                      _buildInfoRow('Requested By', order.amendmentRequestedBy ?? 'N/A'),
-                      _buildInfoRow('Department', order.amendmentRequestedDepartment ?? 'N/A'),
+                      _buildInfoRow('Requested By', widget.order.amendmentRequestedBy ?? 'N/A'),
+                      _buildInfoRow('Department', widget.order.amendmentRequestedDepartment ?? 'N/A'),
                       _buildInfoRow('Date/Time', formattedAmendmentDate),
+                      if (_vehicleType != null && _vehicleType!.isNotEmpty && _vehicleType != 'Unknown')
+                        _buildInfoRow('Vehicle Type', _vehicleType!),
                     ],
                   ),
                 ),
@@ -374,7 +465,7 @@ class ApprovalSummaryModal extends StatelessWidget {
                         ],
                       ),
                       const SizedBox(height: 16),
-                      _buildInfoRow('Total Segments', '${order.tripSegments.length}', Colors.green),
+                      _buildInfoRow('Total Segments', '${widget.order.tripSegments.length}', Colors.green),
                       _buildInfoRow('Total Weight', '${projectedTotalWeight} kg', Colors.green),
                       _buildInfoRow('Freight Charges', '₹$projectedTotalInvoice', Colors.green),
                       _buildInfoRow('Total Toll Charges', '₹$projectedTotalToll', Colors.green),
@@ -396,7 +487,7 @@ class ApprovalSummaryModal extends StatelessWidget {
                     ElevatedButton.icon(
                       onPressed: () {
                         Navigator.of(context).pop(); // Close approval summary modal
-                        onApprove(); // Trigger approval
+                        widget.onApprove(); // Trigger approval
                       },
                       icon: const Icon(Icons.check_circle),
                       label: const Text('Approve Amendment'),

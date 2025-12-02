@@ -761,24 +761,28 @@ class _AmendmentModalState extends State<AmendmentModal> {
                   children: [
                     Expanded(
                       child: TextFormField(
+                        key: ValueKey('invoice_${index}_${invoiceAmount}'), // Unique key to prevent state mixing
                         controller: TextEditingController(
                           text: (segment['_invoice_string'] as String?) ?? (invoiceAmount ?? 0).toString(),
+                        )..selection = TextSelection.fromPosition(
+                          TextPosition(offset: (segment['_invoice_string'] as String?)?.length ?? (invoiceAmount ?? 0).toString().length),
                         ),
                         keyboardType: TextInputType.number,
+                        textDirection: TextDirection.ltr, // CRITICAL FIX: Force left-to-right text direction to prevent reversed digits
                         decoration: const InputDecoration(
-                          labelText: 'Invoice Amount',
+                          labelText: 'Freight Charges', // CRITICAL FIX: Renamed from 'Invoice Amount' to 'Freight Charges'
                           prefixIcon: Icon(Icons.attach_money),
                           border: OutlineInputBorder(),
                         ),
                         onChanged: (value) {
-                          // Part 2: Update string state first (allows multi-digit input)
+                          // CRITICAL FIX: Update string state first (allows multi-digit input)
                           setState(() {
                             segment['_invoice_string'] = value;
                             // DO NOT parse to int here - only update string state
                           });
                         },
                         onEditingComplete: () {
-                          // Part 2: Parse to int only when user finishes editing
+                          // CRITICAL FIX: Parse to int only when user finishes editing
                           setState(() {
                             final stringValue = segment['_invoice_string'] as String? ?? '';
                             segment['invoice_amount'] = int.tryParse(stringValue) ?? 0;
@@ -789,24 +793,28 @@ class _AmendmentModalState extends State<AmendmentModal> {
                     const SizedBox(width: 16),
                     Expanded(
                       child: TextFormField(
+                        key: ValueKey('toll_${index}_${tollCharges}'), // Unique key to prevent state mixing
                         controller: TextEditingController(
                           text: (segment['_toll_string'] as String?) ?? (tollCharges ?? 0).toString(),
+                        )..selection = TextSelection.fromPosition(
+                          TextPosition(offset: (segment['_toll_string'] as String?)?.length ?? (tollCharges ?? 0).toString().length),
                         ),
                         keyboardType: TextInputType.number,
+                        textDirection: TextDirection.ltr, // CRITICAL FIX: Force left-to-right text direction
                         decoration: const InputDecoration(
                           labelText: 'Toll Charges',
                           prefixIcon: Icon(Icons.local_atm),
                           border: OutlineInputBorder(),
                         ),
                         onChanged: (value) {
-                          // Part 2: Update string state first (allows multi-digit input)
+                          // CRITICAL FIX: Update string state first (allows multi-digit input)
                           setState(() {
                             segment['_toll_string'] = value;
                             // DO NOT parse to int here - only update string state
                           });
                         },
                         onEditingComplete: () {
-                          // Part 2: Parse to int only when user finishes editing
+                          // CRITICAL FIX: Parse to int only when user finishes editing
                           setState(() {
                             final stringValue = segment['_toll_string'] as String? ?? '';
                             segment['toll_charges'] = int.tryParse(stringValue) ?? 0;

@@ -556,7 +556,7 @@ router.post('/create-order', async (req, res) => {
       vehicle_id: vehicleId ? vehicleId.toString() : '',
       vehicle_number: vehicleNumber || '',
       order_status: 'Open',
-      created_at: new Date().toISOString(),
+      created_at: csvService.getISTTimestamp(),
       creator_department: creatorDepartment || '',
       creator_user_id: userId.toString(), // CRITICAL FIX: Track creator user ID
       creator_name: creatorName || '', // Track creator's full name
@@ -640,7 +640,45 @@ router.post('/update-order-status', async (req, res) => {
     
     // Get order before update to check previous status
     const orderBeforeUpdate = await csvService.getOrderById(orderId);
-    const previousStatus = orderBeforeUpdate ? orderBeforeUpdate.order_status : '';
+    if (!orderBeforeUpdate) {
+      return res.status(404).json({
+        success: false,
+        message: 'Order not found'
+      });
+    }
+    const previousStatus = orderBeforeUpdate.order_status || '';
+    
+    // Parse segments to check completion status
+    let segments = [];
+    try {
+      if (orderBeforeUpdate.trip_segments && orderBeforeUpdate.trip_segments.trim() !== '') {
+        segments = JSON.parse(orderBeforeUpdate.trip_segments);
+      }
+    } catch (e) {
+      console.error('Error parsing segments for validation:', e);
+    }
+    
+    // Validation: Block manual completion unless all workflow stages are approved
+    if (newStatus === 'Completed' || newStatus === 'COMPLETED') {
+      const isCompleted = csvService.isOrderCompleted(orderBeforeUpdate, segments);
+      if (!isCompleted) {
+        return res.status(400).json({
+          success: false,
+          message: 'Order cannot be marked as Completed until all workflow stages are approved'
+        });
+      }
+    }
+    
+    // Validation: Block cancellation after final approval
+    if (newStatus === 'Cancelled' || newStatus === 'CANCELLED' || newStatus === 'Canceled' || newStatus === 'CANCELED') {
+      const isCompleted = csvService.isOrderCompleted(orderBeforeUpdate, segments);
+      if (isCompleted) {
+        return res.status(400).json({
+          success: false,
+          message: 'Order cannot be cancelled after all approval stages have been completed'
+        });
+      }
+    }
     
     // Prepare update data with audit fields
     const updateData = {};
@@ -649,7 +687,7 @@ router.post('/update-order-status', async (req, res) => {
     if ((newStatus === 'In-Progress' || newStatus === 'En-Route') && 
         (previousStatus === 'Open' || previousStatus === '')) {
       // Capture approval timestamp
-      updateData.approved_timestamp = new Date().toISOString();
+      updateData.approved_timestamp = csvService.getISTTimestamp();
       
       // Capture approval user information if userId is provided
       if (userId) {
@@ -1123,9 +1161,102 @@ router.post('/amend-order', async (req, res) => {
       }
     }
     
+    // Generate change log for this amendment
+    const changeLog = [];
+    
+    // Track segment count change
+    if (updatedSegments.length !== existingSegments.length) {
+      changeLog.push(`Segment count changed from ${existingSegments.length} to ${updatedSegments.length}`);
+    }
+    
+    // Track new segments added
+    const newSegmentsAdded = updatedSegments.slice(originalSegmentCount);
+    if (newSegmentsAdded.length > 0) {
+      newSegmentsAdded.forEach((seg, idx) => {
+        const segmentNum = originalSegmentCount + idx + 1;
+        const route = `${seg.source} → ${seg.destination}`;
+        const weight = seg.material_weight || 0;
+        const materialType = seg.material_type || 'N/A';
+        changeLog.push(`Added Segment #${segmentNum}: ${route} (${weight} kg, Type: ${materialType})`);
+      });
+    }
+    
+    // Track changes in existing segments (if any were modified)
+    for (let i = 0; i < Math.min(existingSegments.length, updatedSegments.length); i++) {
+      const oldSeg = existingSegments[i];
+      const newSeg = updatedSegments[i];
+      const segmentChanges = [];
+      
+      if (oldSeg.source !== newSeg.source) {
+        segmentChanges.push(`Starting Point changed from '${oldSeg.source}' to '${newSeg.source}'`);
+      }
+      if (oldSeg.destination !== newSeg.destination) {
+        segmentChanges.push(`End Point changed from '${oldSeg.destination}' to '${newSeg.destination}'`);
+      }
+      if ((oldSeg.material_weight || 0) !== (newSeg.material_weight || 0)) {
+        segmentChanges.push(`Material Weight changed from ${oldSeg.material_weight || 0} kg to ${newSeg.material_weight || 0} kg`);
+      }
+      if (oldSeg.material_type !== newSeg.material_type) {
+        segmentChanges.push(`Material Type changed from '${oldSeg.material_type || 'N/A'}' to '${newSeg.material_type || 'N/A'}'`);
+      }
+      if ((oldSeg.invoice_amount || 0) !== (newSeg.invoice_amount || 0)) {
+        segmentChanges.push(`Freight Charges changed from ₹${oldSeg.invoice_amount || 0} to ₹${newSeg.invoice_amount || 0}`);
+      }
+      
+      if (segmentChanges.length > 0) {
+        changeLog.push(`Segment #${i + 1} modifications: ${segmentChanges.join('; ')}`);
+      }
+    }
+    
+    // Track total changes
+    if (originalTotals.total_weight !== projectedTotals.total_weight) {
+      changeLog.push(`Total Weight changed from ${originalTotals.total_weight} kg to ${projectedTotals.total_weight} kg`);
+    }
+    if (originalTotals.total_invoice_amount !== projectedTotals.total_invoice_amount) {
+      changeLog.push(`Total Freight Charges changed from ₹${originalTotals.total_invoice_amount} to ₹${projectedTotals.total_invoice_amount}`);
+    }
+    
+    // If no specific changes detected, add generic message
+    if (changeLog.length === 0) {
+      changeLog.push(`Order amended with ${newSegmentsAdded.length} new segment(s)`);
+    }
+    
+    // Parse existing amendment history
+    let amendmentHistory = [];
+    try {
+      if (order.amendment_history && order.amendment_history.trim() !== '') {
+        amendmentHistory = JSON.parse(order.amendment_history);
+      }
+    } catch (error) {
+      console.error('Error parsing existing amendment history:', error);
+      amendmentHistory = [];
+    }
+    
+    // Calculate next version number
+    const versionNumber = amendmentHistory.length + 1;
+    
+    // Create new amendment entry
+    const newAmendment = {
+      version: `V${versionNumber}`,
+      timestamp: csvService.getISTTimestamp(),
+      amendedBy: amendmentRequestedBy || 'Unknown',
+      amendedByDepartment: amendmentRequestedDepartment || 'Unknown',
+      amendedByUserId: userId ? userId.toString() : '',
+      changeLog: changeLog,
+      segmentsBefore: existingSegments.length,
+      segmentsAfter: updatedSegments.length,
+      totalWeightBefore: originalTotals.total_weight,
+      totalWeightAfter: projectedTotals.total_weight,
+      totalInvoiceBefore: originalTotals.total_invoice_amount,
+      totalInvoiceAfter: projectedTotals.total_invoice_amount
+    };
+    
+    // Append to history
+    amendmentHistory.push(newAmendment);
+    
     // Update order: set status to 'Open', mark as amended, add audit trail
     // CRITICAL FIX: Add lastAmendedByUserId and lastAmendedTimestamp for tracking
-    const now = new Date().toISOString();
+    const now = csvService.getISTTimestamp();
     const updatedOrder = {
       ...order,
       trip_segments: updatedSegments,
@@ -1147,6 +1278,8 @@ router.post('/amend-order', async (req, res) => {
       // CRITICAL FIX: Track last amendment user and timestamp
       last_amended_by_user_id: userId ? userId.toString() : '',
       last_amended_timestamp: now,
+      // Amendment history (JSON array of all amendments)
+      amendment_history: JSON.stringify(amendmentHistory),
       // Keep original_trip_type unchanged
       // Update source/destination from first/last segment
       source: updatedSegments[0]?.source || order.source || '',
@@ -1212,15 +1345,40 @@ router.post('/initialize-workflow', async (req, res) => {
     for (let i = 0; i < segments.length; i++) {
       const segment = segments[i];
       
-      // Only initialize if workflow doesn't exist or is empty
-      if (!segment.workflow || !Array.isArray(segment.workflow) || segment.workflow.length === 0) {
-        // Determine location (use destination for most stages, source for entry)
-        const location = segment.destination || segment.source || '';
-        segment.workflow = csvService.initializeSegmentWorkflow(segment, location);
+      // CRITICAL FIX: Migrate existing 3-stage workflows to 6-stage format
+      if (segment.workflow && Array.isArray(segment.workflow) && segment.workflow.length === 3) {
+        // Old format detected: migrate to 6 stages
+        const oldWorkflow = segment.workflow;
+        const originLocation = segment.source || '';
+        const destinationLocation = segment.destination || '';
+        
+        // Create new 6-stage workflow
+        const newWorkflow = csvService.initializeSegmentWorkflow(segment);
+        
+        // Preserve existing approval statuses for destination stages (indices 3-5)
+        // Map old stages to new destination stages
+        for (let j = 0; j < oldWorkflow.length; j++) {
+          const oldStage = oldWorkflow[j];
+          const newStageIndex = j + 3; // Destination stages start at index 3
+          if (newWorkflow[newStageIndex]) {
+            // Preserve status, approved_by, department, timestamp, comments
+            newWorkflow[newStageIndex].status = oldStage.status || 'PENDING';
+            newWorkflow[newStageIndex].approved_by = oldStage.approved_by || '';
+            newWorkflow[newStageIndex].department = oldStage.department || '';
+            newWorkflow[newStageIndex].timestamp = oldStage.timestamp || Date.now();
+            newWorkflow[newStageIndex].comments = oldStage.comments || '';
+          }
+        }
+        
+        segment.workflow = newWorkflow;
+        console.log(`[Migration] Migrated segment ${segment.segment_id} from 3-stage to 6-stage workflow`);
+      } else if (!segment.workflow || !Array.isArray(segment.workflow) || segment.workflow.length === 0) {
+        // No workflow exists: initialize new 6-stage workflow
+        segment.workflow = csvService.initializeSegmentWorkflow(segment);
         
         // For first segment, set first stage status based on order status
         if (i === 0 && order.order_status === 'En-Route') {
-          // First segment's SECURITY_ENTRY is active
+          // First segment's origin SECURITY_ENTRY (index 0) is active
           if (segment.workflow[0]) {
             segment.workflow[0].status = 'PENDING';
           }
@@ -1257,7 +1415,7 @@ router.post('/initialize-workflow', async (req, res) => {
 // POST /api/workflow-action - Perform workflow action (approve/reject/revoke/cancel)
 router.post('/workflow-action', async (req, res) => {
   try {
-    const { orderId, segmentId, stage, action, userId, comments } = req.body;
+    const { orderId, segmentId, stage, action, userId, comments, location } = req.body;
     
     if (!orderId || !segmentId || !stage || !action || !userId) {
       return res.status(400).json({
@@ -1345,8 +1503,19 @@ router.post('/workflow-action', async (req, res) => {
       });
     }
     
-    // Find workflow step
-    const stepIndex = workflowSteps.findIndex(ws => ws.stage === stage);
+    // Sort workflow steps by stage_index to ensure correct order
+    workflowSteps.sort((a, b) => {
+      const indexA = a.stage_index !== undefined ? a.stage_index : 999;
+      const indexB = b.stage_index !== undefined ? b.stage_index : 999;
+      return indexA - indexB;
+    });
+    
+    // CRITICAL FIX: Find workflow step by both stage name AND location
+    // This is necessary because we now have 6 stages (3 origin + 3 destination) with same stage names
+    const stepIndex = workflowSteps.findIndex(ws => 
+      ws.stage === stage && 
+      (!location || ws.location === location)
+    );
     if (stepIndex === -1) {
       return res.status(404).json({
         success: false,
@@ -1360,7 +1529,7 @@ router.post('/workflow-action', async (req, res) => {
     if (action === 'CANCEL') {
       // CRITICAL FIX: Record complete audit trail for cancellation
       const cancelTimestamp = Date.now();
-      const cancelDateTime = new Date().toISOString();
+      const cancelDateTime = csvService.getISTTimestamp();
       
       // Update order status to CANCELED
       order.order_status = 'CANCELED';
@@ -1407,15 +1576,41 @@ router.post('/workflow-action', async (req, res) => {
       
       // CRITICAL FIX: Record complete audit trail for revocation
       const revokeTimestamp = Date.now();
-      const revokeDateTime = new Date().toISOString();
+      const revokeDateTime = csvService.getISTTimestamp();
       
-      // Reset to PENDING
+      // Sort workflow steps by stage_index to ensure correct order
+      workflowSteps.sort((a, b) => {
+        const indexA = a.stage_index !== undefined ? a.stage_index : 999;
+        const indexB = b.stage_index !== undefined ? b.stage_index : 999;
+        return indexA - indexB;
+      });
+      
+      // Get current stage index
+      const currentStepIndex = stepIndex;
+      
+      // CRITICAL FIX: Reset to PENDING
       workflowStep.status = 'PENDING';
       workflowStep.approved_by = userName || 'Unknown'; // Keep who revoked for audit
       workflowStep.department = userDepartment || 'Unknown'; // Keep department for audit
       workflowStep.timestamp = revokeTimestamp;
       workflowStep.comments = comments || 'Rejection revoked';
-      workflowStep.location = segment.destination || segment.source || '';
+      workflowStep.location = workflowStep.location || segment.destination || segment.source || '';
+      
+      // CRITICAL FIX: Reset downstream stages that were APPROVED after this stage
+      // When a stage is rejected, downstream stages are blocked. When we revoke,
+      // we need to reset any downstream APPROVED stages back to PENDING so they
+      // can be re-approved in the correct sequence.
+      for (let i = currentStepIndex + 1; i < workflowSteps.length; i++) {
+        const downstreamStage = workflowSteps[i];
+        if (downstreamStage && downstreamStage.status === 'APPROVED') {
+          console.log(`[Revoke] Resetting downstream stage ${i} (${downstreamStage.stage}) from APPROVED to PENDING`);
+          downstreamStage.status = 'PENDING';
+          downstreamStage.approved_by = '';
+          downstreamStage.department = '';
+          downstreamStage.comments = '';
+          downstreamStage.timestamp = Date.now();
+        }
+      }
       
       // CRITICAL FIX: Log audit trail
       console.log(`[Workflow Audit] REVOKED - Stage: ${stage}, Order: ${orderId}, Segment: ${segmentId}`);
@@ -1423,10 +1618,18 @@ router.post('/workflow-action', async (req, res) => {
       console.log(`  Revoker Department: ${userDepartment}`);
       console.log(`  Date/Time: ${revokeDateTime}`);
       console.log(`  Revocation Reason: ${comments || 'Not provided'}`);
+      console.log(`  Downstream stages reset to PENDING`);
       
-      // Update segment status based on stage
+      // Update segment status based on stage position
+      const isOriginLocation = currentStepIndex < 3; // Stages 0-2 are origin
+      const isDestinationLocation = currentStepIndex >= 3; // Stages 3-5 are destination
+      
       if (stage === 'SECURITY_ENTRY') {
-        segment.segment_status = 'SECURITY_ENTRY_PENDING';
+        if (isOriginLocation) {
+          segment.segment_status = 'SECURITY_ENTRY_PENDING';
+        } else {
+          segment.segment_status = 'SECURITY_ENTRY_PENDING';
+        }
       } else if (stage === 'STORES_VERIFICATION') {
         segment.segment_status = 'STORES_VERIFICATION_PENDING';
       } else if (stage === 'SECURITY_EXIT') {
@@ -1436,7 +1639,7 @@ router.post('/workflow-action', async (req, res) => {
     
     // CRITICAL FIX: Record complete audit trail for all workflow actions
     const auditTimestamp = Date.now();
-    const auditDateTime = new Date().toISOString();
+    const auditDateTime = csvService.getISTTimestamp();
     
     // CRITICAL FIX: Ensure all audit fields are properly set
     // Handle APPROVE action
@@ -1446,7 +1649,8 @@ router.post('/workflow-action', async (req, res) => {
       workflowStep.department = userDepartment || 'Unknown';
       workflowStep.timestamp = auditTimestamp;
       workflowStep.comments = comments || '';
-      workflowStep.location = segment.destination || segment.source || '';
+      // CRITICAL FIX: Preserve location from workflow step (origin or destination)
+      workflowStep.location = workflowStep.location || location || segment.destination || segment.source || '';
       
       // CRITICAL FIX: Log audit trail
       console.log(`[Workflow Audit] APPROVED - Stage: ${stage}, Order: ${orderId}, Segment: ${segmentId}`);
@@ -1533,42 +1737,83 @@ router.post('/workflow-action', async (req, res) => {
         }
       }
       
-      // Update segment status based on progression
+      // CRITICAL FIX: Update segment status based on 6-stage workflow progression
+      // Sort workflow steps by stage_index to ensure correct order
+      workflowSteps.sort((a, b) => {
+        const indexA = a.stage_index !== undefined ? a.stage_index : 999;
+        const indexB = b.stage_index !== undefined ? b.stage_index : 999;
+        return indexA - indexB;
+      });
+      
+      const currentStepIndex = stepIndex;
+      const isOriginLocation = currentStepIndex < 3; // Stages 0-2 are origin
+      const isDestinationLocation = currentStepIndex >= 3; // Stages 3-5 are destination
+      
       if (stage === 'SECURITY_ENTRY') {
-        segment.segment_status = 'STORES_VERIFICATION_PENDING';
+        if (isOriginLocation) {
+          segment.segment_status = 'STORES_VERIFICATION_PENDING';
+        } else {
+          // Destination SECURITY_ENTRY approved, activate STORES_VERIFICATION
+          segment.segment_status = 'STORES_VERIFICATION_PENDING';
+        }
       } else if (stage === 'STORES_VERIFICATION') {
-        segment.segment_status = 'SECURITY_EXIT_PENDING';
+        if (isOriginLocation) {
+          segment.segment_status = 'SECURITY_EXIT_PENDING';
+        } else {
+          // Destination STORES_VERIFICATION approved, activate SECURITY_EXIT
+          segment.segment_status = 'SECURITY_EXIT_PENDING';
+        }
       } else if (stage === 'SECURITY_EXIT') {
-        segment.segment_status = 'COMPLETED';
-        
-        // Activate next segment's SECURITY_ENTRY if exists
-        if (segmentIndex + 1 < segments.length) {
-          const nextSegment = segments[segmentIndex + 1];
-          let nextWorkflowSteps = [];
-          if (nextSegment.workflow) {
-            if (Array.isArray(nextSegment.workflow)) {
-              nextWorkflowSteps = nextSegment.workflow;
-            } else if (typeof nextSegment.workflow === 'string') {
-              try {
-                nextWorkflowSteps = JSON.parse(nextSegment.workflow);
-              } catch (e) {
-                nextWorkflowSteps = [];
+        if (isOriginLocation) {
+          // Origin SECURITY_EXIT approved, activate destination SECURITY_ENTRY
+          const destinationSecurityEntry = workflowSteps.find(ws => 
+            ws.stage === 'SECURITY_ENTRY' && ws.stage_index === 3
+          );
+          if (destinationSecurityEntry) {
+            destinationSecurityEntry.status = 'PENDING';
+            segment.segment_status = 'SECURITY_ENTRY_PENDING';
+          }
+        } else {
+          // Destination SECURITY_EXIT approved, segment is completed
+          segment.segment_status = 'COMPLETED';
+          
+          // Activate next segment's origin SECURITY_ENTRY if exists
+          if (segmentIndex + 1 < segments.length) {
+            const nextSegment = segments[segmentIndex + 1];
+            let nextWorkflowSteps = [];
+            if (nextSegment.workflow) {
+              if (Array.isArray(nextSegment.workflow)) {
+                nextWorkflowSteps = nextSegment.workflow;
+              } else if (typeof nextSegment.workflow === 'string') {
+                try {
+                  nextWorkflowSteps = JSON.parse(nextSegment.workflow);
+                } catch (e) {
+                  nextWorkflowSteps = [];
+                }
               }
             }
-          }
-          
-          // Initialize workflow if not exists
-          if (nextWorkflowSteps.length === 0) {
-            const location = nextSegment.destination || nextSegment.source || '';
-            nextWorkflowSteps = csvService.initializeSegmentWorkflow(nextSegment, location);
-            nextSegment.workflow = nextWorkflowSteps;
-          }
-          
-          // Activate SECURITY_ENTRY
-          const nextSecurityEntry = nextWorkflowSteps.find(ws => ws.stage === 'SECURITY_ENTRY');
-          if (nextSecurityEntry) {
-            nextSecurityEntry.status = 'PENDING';
-            nextSegment.segment_status = 'SECURITY_ENTRY_PENDING';
+            
+            // Initialize workflow if not exists
+            if (nextWorkflowSteps.length === 0) {
+              nextWorkflowSteps = csvService.initializeSegmentWorkflow(nextSegment);
+              nextSegment.workflow = nextWorkflowSteps;
+            }
+            
+            // Sort next segment workflow steps by stage_index
+            nextWorkflowSteps.sort((a, b) => {
+              const indexA = a.stage_index !== undefined ? a.stage_index : 999;
+              const indexB = b.stage_index !== undefined ? b.stage_index : 999;
+              return indexA - indexB;
+            });
+            
+            // Activate origin SECURITY_ENTRY (stage_index 0)
+            const nextOriginSecurityEntry = nextWorkflowSteps.find(ws => 
+              ws.stage === 'SECURITY_ENTRY' && ws.stage_index === 0
+            );
+            if (nextOriginSecurityEntry) {
+              nextOriginSecurityEntry.status = 'PENDING';
+              nextSegment.segment_status = 'SECURITY_ENTRY_PENDING';
+            }
           }
         }
       }
@@ -1576,6 +1821,15 @@ router.post('/workflow-action', async (req, res) => {
     
     // Handle REJECT action
     if (action === 'REJECT') {
+      // Validation: Block rejection after final approval
+      const isCompleted = csvService.isOrderCompleted(order, segments);
+      if (isCompleted) {
+        return res.status(400).json({
+          success: false,
+          message: 'Order cannot be rejected after all approval stages have been completed'
+        });
+      }
+      
       workflowStep.status = 'REJECTED';
       workflowStep.approved_by = userName || 'Unknown';
       workflowStep.department = userDepartment || 'Unknown';
@@ -1605,22 +1859,68 @@ router.post('/workflow-action', async (req, res) => {
     segment.workflow = workflowSteps;
     segments[segmentIndex] = segment;
     
+    // CRITICAL FIX: Update order's trip_segments BEFORE checking completion status
+    // This ensures the completion check uses the most up-to-date workflow data
+    order.trip_segments = JSON.stringify(segments);
+    
     // CRITICAL FIX: Check if order workflow is completed or rejected and update order status
     const isOrderRejected = csvService.isOrderRejected(order, segments);
     const isOrderCompleted = csvService.isOrderCompleted(order, segments);
     
-    if (isOrderRejected && order.order_status !== 'REJECTED' && order.order_status !== 'CANCELLED' && order.order_status !== 'CANCELED') {
+    // Enhanced logging for debugging completion detection
+    console.log(`[Workflow Status Check] Order ${orderId}:`);
+    console.log(`  Current status: ${order.order_status}`);
+    console.log(`  Is rejected: ${isOrderRejected}`);
+    console.log(`  Is completed: ${isOrderCompleted}`);
+    console.log(`  Segments count: ${segments.length}`);
+    segments.forEach((seg, idx) => {
+      const segWorkflow = Array.isArray(seg.workflow) ? seg.workflow : 
+        (typeof seg.workflow === 'string' ? JSON.parse(seg.workflow) : []);
+      const approvedCount = segWorkflow.filter(ws => 
+        (ws.status || '').toUpperCase().trim() === 'APPROVED' || 
+        (ws.status || '').toUpperCase().trim() === 'COMPLETED'
+      ).length;
+      console.log(`  Segment ${idx + 1}: ${approvedCount}/${segWorkflow.length} stages approved`);
+    });
+    
+    // Normalize current status for case-insensitive comparison
+    const currentStatus = (order.order_status || '').toUpperCase().trim();
+    
+    if (isOrderRejected && currentStatus !== 'REJECTED' && currentStatus !== 'CANCELLED' && currentStatus !== 'CANCELED') {
       console.log(`[Workflow Status Update] Order ${orderId} workflow is REJECTED - updating order status to REJECTED`);
       order.order_status = 'REJECTED';
-    } else if (isOrderCompleted && order.order_status !== 'COMPLETED' && order.order_status !== 'REJECTED' && order.order_status !== 'CANCELLED' && order.order_status !== 'CANCELED') {
+      // Also free the vehicle when order is rejected
+      if (order.vehicle_id) {
+        try {
+          await csvService.updateVehicleStatus(order.vehicle_id, 'Free');
+        } catch (error) {
+          console.error('Error freeing vehicle on rejection:', error);
+        }
+      }
+    } else if (isOrderCompleted && currentStatus !== 'COMPLETED' && currentStatus !== 'REJECTED' && currentStatus !== 'CANCELLED' && currentStatus !== 'CANCELED') {
       console.log(`[Workflow Status Update] Order ${orderId} workflow is COMPLETED - updating order status to COMPLETED`);
+      console.log(`[Workflow Status Update] Previous status: ${order.order_status}, New status: COMPLETED`);
       order.order_status = 'COMPLETED';
+      
+      // Free the vehicle when order is completed
+      if (order.vehicle_id) {
+        try {
+          await csvService.updateVehicleStatus(order.vehicle_id, 'Free');
+          console.log(`[Workflow Status Update] Vehicle ${order.vehicle_id} freed`);
+        } catch (error) {
+          console.error('Error freeing vehicle on completion:', error);
+        }
+      }
+    } else if (isOrderCompleted && currentStatus === 'COMPLETED') {
+      console.log(`[Workflow Status Check] Order ${orderId} is already COMPLETED - no status change needed`);
+    } else if (!isOrderCompleted) {
+      console.log(`[Workflow Status Check] Order ${orderId} is not yet completed - remaining in ${order.order_status}`);
     }
     
     // Update order - order object already has audit fields updated above
     const updatedOrder = {
       ...order,
-      trip_segments: segments
+      trip_segments: JSON.stringify(segments) // Ensure segments are serialized
     };
     
     // Save order
@@ -1725,6 +2025,85 @@ router.get('/notifications/unread-count/:department', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Internal server error'
+    });
+  }
+});
+
+// POST /api/fix-completed-orders - Retroactive fix for orders that are completed but still marked En-Route
+router.post('/fix-completed-orders', async (req, res) => {
+  try {
+    console.log('[Fix Completed Orders] Starting retroactive fix for completed orders...');
+    
+    const orders = await csvService.readOrders();
+    let fixedCount = 0;
+    const fixedOrders = [];
+    
+    for (const order of orders) {
+      // Skip orders that are already completed, rejected, or cancelled
+      const currentStatus = (order.order_status || '').toUpperCase().trim();
+      if (currentStatus === 'COMPLETED' || currentStatus === 'REJECTED' || 
+          currentStatus === 'CANCELLED' || currentStatus === 'CANCELED') {
+        continue;
+      }
+      
+      // Parse segments
+      let segments = [];
+      try {
+        if (order.trip_segments && order.trip_segments.trim() !== '') {
+          segments = JSON.parse(order.trip_segments);
+        }
+      } catch (e) {
+        console.error(`[Fix Completed Orders] Error parsing segments for order ${order.order_id}:`, e);
+        continue;
+      }
+      
+      // Check if order is actually completed
+      const isOrderRejected = csvService.isOrderRejected(order, segments);
+      const isOrderCompleted = csvService.isOrderCompleted(order, segments);
+      
+      if (!isOrderRejected && isOrderCompleted) {
+        const previousStatus = order.order_status || 'Unknown';
+        console.log(`[Fix Completed Orders] Order ${order.order_id} is fully completed but status is ${previousStatus} - fixing...`);
+        
+        // Update order status to COMPLETED
+        order.order_status = 'COMPLETED';
+        
+        // Free the vehicle if assigned
+        if (order.vehicle_id) {
+          try {
+            await csvService.updateVehicleStatus(order.vehicle_id, 'Free');
+            console.log(`[Fix Completed Orders] Vehicle ${order.vehicle_id} freed for order ${order.order_id}`);
+          } catch (error) {
+            console.error(`[Fix Completed Orders] Error freeing vehicle ${order.vehicle_id}:`, error);
+          }
+        }
+        
+        // Save updated order
+        await csvService.writeOrder(order);
+        fixedCount++;
+        fixedOrders.push({
+          orderId: order.order_id,
+          previousStatus: previousStatus,
+          newStatus: 'COMPLETED'
+        });
+        
+        console.log(`[Fix Completed Orders] ✓ Fixed order ${order.order_id} (${previousStatus} → COMPLETED)`);
+      }
+    }
+    
+    console.log(`[Fix Completed Orders] Completed. Fixed ${fixedCount} order(s).`);
+    
+    res.json({
+      success: true,
+      message: `Fixed ${fixedCount} completed order(s)`,
+      fixedCount: fixedCount,
+      fixedOrders: fixedOrders
+    });
+  } catch (error) {
+    console.error('[Fix Completed Orders] Error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Internal server error'
     });
   }
 });

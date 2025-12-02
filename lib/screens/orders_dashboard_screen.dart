@@ -449,10 +449,27 @@ class _OrdersDashboardScreenState extends State<OrdersDashboardScreen> {
     final vehicle = _getVehicleData(order.vehicleNumber);
     final vehicleType = vehicle?.vehicleType ?? vehicle?.type ?? 'N/A';
     final vehicleCapacity = vehicle?.capacityKg ?? 0;
-    final capacityPercentage = vehicleCapacity > 0 
-        ? ((totalWeight / vehicleCapacity) * 100).toStringAsFixed(1)
-        : '0.0';
-    final capacityPercentageValue = vehicleCapacity > 0 ? double.parse(capacityPercentage) : 0.0;
+    
+    // Calculate utilization percentage with proper handling for exact matches and edge cases
+    double capacityPercentageValue = 0.0;
+    String capacityPercentage = '0.0';
+    if (vehicleCapacity > 0 && totalWeight > 0) {
+      // Use double division to ensure proper calculation (avoid integer division issues)
+      capacityPercentageValue = (totalWeight.toDouble() / vehicleCapacity.toDouble()) * 100.0;
+      // Handle exact match: if weight equals or exceeds capacity, show 100%
+      if (totalWeight >= vehicleCapacity) {
+        capacityPercentageValue = 100.0;
+      }
+      // Cap at 100% if it exceeds due to floating point precision
+      if (capacityPercentageValue > 100.0) {
+        capacityPercentageValue = 100.0;
+      }
+      capacityPercentage = capacityPercentageValue.toStringAsFixed(1);
+    } else if (vehicleCapacity > 0 && totalWeight == 0) {
+      // Order has no weight, show 0%
+      capacityPercentage = '0.0';
+      capacityPercentageValue = 0.0;
+    }
     
     // Get workflow status information
     final currentSegmentStatus = _getCurrentSegmentStatus(order);
@@ -949,7 +966,8 @@ class OrderDetailModal extends StatelessWidget {
 
   String _formatAuditTimestamp(DateTime? date) {
     if (date == null) return 'N/A';
-    return '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year} ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}:${date.second.toString().padLeft(2, '0')}';
+    // DateTime is already in IST (parsed from backend with +05:30 offset)
+    return '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year} ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}:${date.second.toString().padLeft(2, '0')} IST';
   }
 
   Widget _buildTotalRow(String label, String value, IconData icon, [Color? valueColor]) {
@@ -1410,6 +1428,33 @@ class OrderDetailModal extends StatelessWidget {
                     ],
                   ),
                 ),
+                // Amendment History Section
+                if (order.amendmentHistory != null && order.amendmentHistory!.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Amendment History',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                      color: AppTheme.primaryOrange,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppTheme.darkSurface,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: AppTheme.darkBorder, width: 1),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: order.amendmentHistory!.map((amendment) {
+                        return _buildAmendmentHistoryEntry(amendment);
+                      }).toList(),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 16),
                 Container(
                   padding: const EdgeInsets.all(10), // Reduced from 12
@@ -1521,32 +1566,30 @@ class OrderDetailModal extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 8),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: () => _updateOrderStatus(context, 'Completed'),
-                      icon: const Icon(Icons.check_circle),
-                      label: const Text('Complete Order'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                      ),
-                    ),
-                  ),
                 ],
+                // Cancel Order button - disabled if order is fully completed
                 if (order.orderStatus != 'Completed' && order.orderStatus != 'Cancelled')
                   SizedBox(
                     width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: () => _updateOrderStatus(context, 'Cancelled'),
-                      icon: const Icon(Icons.cancel),
-                      label: const Text('Cancel Order'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.red,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                      ),
+                    child: Builder(
+                      builder: (context) {
+                        final isCompleted = _workflowService.isOrderCompleted(order);
+                        return Tooltip(
+                          message: isCompleted 
+                              ? 'Order cannot be cancelled after all approval stages have been completed'
+                              : 'Cancel this order',
+                          child: ElevatedButton.icon(
+                            onPressed: isCompleted ? null : () => _updateOrderStatus(context, 'Cancelled'),
+                            icon: const Icon(Icons.cancel),
+                            label: const Text('Cancel Order'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: isCompleted ? Colors.grey : Colors.red,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                            ),
+                          ),
+                        );
+                      },
                     ),
                   ),
               ],
@@ -1555,6 +1598,107 @@ class OrderDetailModal extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  Widget _buildAmendmentHistoryEntry(AmendmentHistoryEntry amendment) {
+    final formattedDate = _formatAmendmentDate(amendment.timestamp);
+    
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppTheme.darkCard,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppTheme.primaryOrange.withOpacity(0.3), width: 1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header: Version and Timestamp
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryOrange.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  amendment.version,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: AppTheme.primaryOrange,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  formattedDate,
+                  style: const TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          // Amended By
+          Text(
+            'Amended by ${amendment.amendedBy} (${amendment.amendedByDepartment})',
+            style: const TextStyle(
+              fontWeight: FontWeight.w600,
+              color: AppTheme.textPrimary,
+              fontSize: 13,
+            ),
+          ),
+          const SizedBox(height: 8),
+          // Change Log
+          if (amendment.changeLog.isNotEmpty) ...[
+            const Text(
+              'Changes:',
+              style: TextStyle(
+                fontWeight: FontWeight.w600,
+                color: AppTheme.textSecondary,
+                fontSize: 12,
+              ),
+            ),
+            const SizedBox(height: 4),
+            ...amendment.changeLog.map((change) {
+              return Padding(
+                padding: const EdgeInsets.only(left: 8, top: 2),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('• ', style: TextStyle(color: AppTheme.primaryOrange, fontSize: 12)),
+                    Expanded(
+                      child: Text(
+                        change,
+                        style: const TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }).toList(),
+          ],
+        ],
+      ),
+    );
+  }
+
+  String _formatAmendmentDate(DateTime date) {
+    final day = date.day.toString().padLeft(2, '0');
+    final month = date.month.toString().padLeft(2, '0');
+    final year = date.year;
+    final hour = date.hour.toString().padLeft(2, '0');
+    final minute = date.minute.toString().padLeft(2, '0');
+    return '$day/$month/$year at $hour:$minute IST';
   }
 
   Widget _buildAuditSection(String title, List<Widget> children) {

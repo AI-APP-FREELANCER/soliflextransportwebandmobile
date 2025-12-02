@@ -2167,6 +2167,7 @@ class _RFQCreateScreenState extends State<RFQCreateScreen> {
                   'Manual Truck Entry',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.bold,
+                        color: Colors.blue.shade900, // Dark blue for better contrast on light blue background
                       ),
                 ),
               ],

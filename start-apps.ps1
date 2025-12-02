@@ -18,6 +18,9 @@ Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$PSScriptRoot
 Start-Sleep -Seconds 3
 
 Write-Host "Starting Flutter Frontend on port 8081..." -ForegroundColor Green
+Write-Host "Note: If you encounter SocketException errors, try:" -ForegroundColor Yellow
+Write-Host "  1. Run .\debug-flutter-web.ps1 for diagnostics" -ForegroundColor Yellow
+Write-Host "  2. Use --release flag: flutter run -d chrome --web-port=8081 --release" -ForegroundColor Yellow
 Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$PSScriptRoot'; flutter run -d chrome --web-port=8081"
 
 Write-Host "`nDone! Backend: http://localhost:3000" -ForegroundColor Cyan

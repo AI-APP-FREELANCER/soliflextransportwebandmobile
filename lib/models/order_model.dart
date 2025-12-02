@@ -2,6 +2,70 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'trip_segment_model.dart';
 
+/// Represents a single entry in the amendment history
+class AmendmentHistoryEntry {
+  final String version; // e.g., "V1", "V2"
+  final DateTime timestamp;
+  final String amendedBy;
+  final String amendedByDepartment;
+  final String amendedByUserId;
+  final List<String> changeLog;
+  final int segmentsBefore;
+  final int segmentsAfter;
+  final int totalWeightBefore;
+  final int totalWeightAfter;
+  final int totalInvoiceBefore;
+  final int totalInvoiceAfter;
+
+  AmendmentHistoryEntry({
+    required this.version,
+    required this.timestamp,
+    required this.amendedBy,
+    required this.amendedByDepartment,
+    required this.amendedByUserId,
+    required this.changeLog,
+    required this.segmentsBefore,
+    required this.segmentsAfter,
+    required this.totalWeightBefore,
+    required this.totalWeightAfter,
+    required this.totalInvoiceBefore,
+    required this.totalInvoiceAfter,
+  });
+
+  factory AmendmentHistoryEntry.fromJson(Map<String, dynamic> json) {
+    return AmendmentHistoryEntry(
+      version: json['version']?.toString() ?? '',
+      timestamp: json['timestamp'] != null 
+          ? DateTime.tryParse(json['timestamp'].toString()) ?? DateTime.now()
+          : DateTime.now(),
+      amendedBy: json['amendedBy']?.toString() ?? 'Unknown',
+      amendedByDepartment: json['amendedByDepartment']?.toString() ?? 'Unknown',
+      amendedByUserId: json['amendedByUserId']?.toString() ?? '',
+      changeLog: json['changeLog'] != null && json['changeLog'] is List
+          ? (json['changeLog'] as List).map((e) => e.toString()).toList()
+          : [],
+      segmentsBefore: json['segmentsBefore'] != null 
+          ? (json['segmentsBefore'] is int ? json['segmentsBefore'] : int.tryParse(json['segmentsBefore'].toString()) ?? 0)
+          : 0,
+      segmentsAfter: json['segmentsAfter'] != null 
+          ? (json['segmentsAfter'] is int ? json['segmentsAfter'] : int.tryParse(json['segmentsAfter'].toString()) ?? 0)
+          : 0,
+      totalWeightBefore: json['totalWeightBefore'] != null 
+          ? (json['totalWeightBefore'] is int ? json['totalWeightBefore'] : int.tryParse(json['totalWeightBefore'].toString()) ?? 0)
+          : 0,
+      totalWeightAfter: json['totalWeightAfter'] != null 
+          ? (json['totalWeightAfter'] is int ? json['totalWeightAfter'] : int.tryParse(json['totalWeightAfter'].toString()) ?? 0)
+          : 0,
+      totalInvoiceBefore: json['totalInvoiceBefore'] != null 
+          ? (json['totalInvoiceBefore'] is int ? json['totalInvoiceBefore'] : int.tryParse(json['totalInvoiceBefore'].toString()) ?? 0)
+          : 0,
+      totalInvoiceAfter: json['totalInvoiceAfter'] != null 
+          ? (json['totalInvoiceAfter'] is int ? json['totalInvoiceAfter'] : int.tryParse(json['totalInvoiceAfter'].toString()) ?? 0)
+          : 0,
+    );
+  }
+}
+
 class OrderModel {
   final String orderId;
   final String userId;
@@ -30,6 +94,7 @@ class OrderModel {
   final DateTime? amendmentRequestedAt; // Timestamp of amendment request
   final String? lastAmendedByUserId; // ID of the last user who amended the order
   final DateTime? lastAmendedTimestamp; // Timestamp of last amendment
+  final List<AmendmentHistoryEntry>? amendmentHistory; // Complete amendment history
   // Original totals before amendment (for approval summary comparison)
   final int? originalTotalWeight; // Total weight before amendment
   final int? originalTotalInvoiceAmount; // Total invoice before amendment
@@ -76,6 +141,7 @@ class OrderModel {
     this.amendmentRequestedAt,
     this.lastAmendedByUserId,
     this.lastAmendedTimestamp,
+    this.amendmentHistory,
     this.originalTotalWeight,
     this.originalTotalInvoiceAmount,
     this.originalTotalTollCharges,
@@ -176,12 +242,13 @@ class OrderModel {
       amendmentRequestedBy: json['amendment_requested_by']?.toString(),
       amendmentRequestedDepartment: json['amendment_requested_department']?.toString(),
       amendmentRequestedAt: json['amendment_requested_at'] != null 
-          ? DateTime.tryParse(json['amendment_requested_at'].toString())
+          ? DateTime.tryParse(json['amendment_requested_at'].toString()) 
           : null,
       lastAmendedByUserId: json['last_amended_by_user_id']?.toString(),
       lastAmendedTimestamp: json['last_amended_timestamp'] != null 
-          ? DateTime.tryParse(json['last_amended_timestamp'].toString())
+          ? DateTime.tryParse(json['last_amended_timestamp'].toString()) 
           : null,
+      amendmentHistory: _parseAmendmentHistory(json['amendment_history']),
       // Original totals before amendment
       originalTotalWeight: json['original_total_weight'] != null
           ? (json['original_total_weight'] is int
@@ -293,6 +360,37 @@ class OrderModel {
   int getTotalTollCharges() {
     if (totalTollCharges != null) return totalTollCharges!;
     return tripSegments.fold(0, (sum, segment) => sum + (segment.tollCharges ?? 0));
+  }
+
+  /// Parse amendment history from JSON string or array
+  static List<AmendmentHistoryEntry>? _parseAmendmentHistory(dynamic jsonValue) {
+    if (jsonValue == null) return null;
+    
+    try {
+      List<dynamic> historyList;
+      if (jsonValue is String) {
+        // Parse JSON string
+        if (jsonValue.trim().isEmpty) return null;
+        final decoded = jsonDecode(jsonValue);
+        historyList = decoded is List ? decoded : [];
+      } else if (jsonValue is List) {
+        historyList = jsonValue;
+      } else {
+        return null;
+      }
+      
+      if (historyList.isEmpty) return null;
+      
+      return historyList.map((entry) {
+        if (entry is Map<String, dynamic>) {
+          return AmendmentHistoryEntry.fromJson(entry);
+        }
+        return null;
+      }).whereType<AmendmentHistoryEntry>().toList();
+    } catch (e) {
+      // Silently return null on parse error - amendment history is optional
+      return null;
+    }
   }
 
   List<String> getAllMaterialTypes() {
