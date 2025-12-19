@@ -645,6 +645,55 @@ class ApiService {
     }
   }
 
+  // Assign Vehicle to Order
+  Future<Map<String, dynamic>> assignVehicleToOrder({
+    required String orderId,
+    String? vehicleId,
+    required String vehicleNumber,
+    String? vehicleType,
+    int? capacityKg,
+    String? userId,
+  }) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/assign-vehicle-to-order'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'orderId': orderId,
+          if (vehicleId != null) 'vehicleId': vehicleId,
+          'vehicleNumber': vehicleNumber,
+          if (vehicleType != null) 'vehicleType': vehicleType,
+          if (capacityKg != null) 'capacityKg': capacityKg,
+          if (userId != null) 'userId': userId,
+        }),
+      );
+
+      if (response.statusCode != 200) {
+        final errorData = jsonDecode(response.body) as Map<String, dynamic>;
+        return {
+          'success': false,
+          'message': errorData['message'] ?? 'Failed to assign vehicle: ${response.statusCode}',
+          'order': null,
+        };
+      }
+
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      return {
+        'success': data['success'] ?? false,
+        'message': data['message'] ?? '',
+        'order': data['order'] != null
+            ? OrderModel.fromJson(data['order'] as Map<String, dynamic>)
+            : null,
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'message': 'Network error: ${e.toString()}',
+        'order': null,
+      };
+    }
+  }
+
   // Update Order Status
   Future<Map<String, dynamic>> updateOrderStatus({
     required String orderId,

@@ -492,13 +492,12 @@ class _RFQCreateScreenState extends State<RFQCreateScreen> {
         print('[RFQ Create]   ✓ Manual vehicle entry complete: $vehicleNumber');
       }
 
+      // Vehicle selection is now optional - order can be created without vehicle
+      // Vehicle assignment will be required during Admin/Accounts approval
       if (!hasVehicle) {
-        print('[RFQ Create]   ERROR: No vehicle selected or manual entry incomplete');
-        _showErrorModal('Vehicle Selection Required', 
-            'Please either:\n'
-            '1. Select a vehicle from the suggested matches, OR\n'
-            '2. Use "Add Manual Truck Entry" and complete all fields.');
-        return;
+        print('[RFQ Create]   INFO: No vehicle selected. Order will be created without vehicle assignment.');
+        vehicleId = null;
+        vehicleNumber = null;
       }
 
       // Step 6: Get user

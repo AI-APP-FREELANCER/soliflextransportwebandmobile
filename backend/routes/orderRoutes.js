@@ -470,8 +470,8 @@ router.post('/create-order', async (req, res) => {
       console.log(`  Segment 2 (Return): ${segment2.source} -> ${segment2.destination}`);
     }
     
-    // Assign truck (update vehicle status to 'Booked')
-    if (vehicleId) {
+    // NEW LOGIC: Only assign truck if vehicleId is provided during creation
+    if (vehicleId && vehicleId.trim() !== '') {
       try {
         await csvService.updateVehicleStatus(vehicleId, 'Booked');
       } catch (error) {
@@ -481,6 +481,8 @@ router.post('/create-order', async (req, res) => {
           message: `Failed to assign vehicle: ${error.message}`
         });
       }
+    } else {
+      console.log(`[Create Order] No vehicle assigned at creation for Order ${orderId}. Assignment required at approval.`);
     }
     
     // Calculate order category based on trip segments
@@ -626,6 +628,68 @@ router.post('/create-order', async (req, res) => {
   }
 });
 
+// POST /api/assign-vehicle-to-order - Assign vehicle to an order
+router.post('/assign-vehicle-to-order', async (req, res) => {
+  try {
+    const { orderId, vehicleId, vehicleNumber, vehicleType, capacityKg, userId } = req.body;
+    
+    if (!orderId || !vehicleNumber) {
+      return res.status(400).json({
+        success: false,
+        message: 'Order ID and vehicle number are required'
+      });
+    }
+    
+    // Get order
+    const order = await csvService.getOrderById(orderId);
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: 'Order not found'
+      });
+    }
+    
+    // Check if order already has a vehicle
+    if (order.vehicle_id && order.vehicle_id.trim() !== '') {
+      // Free the old vehicle if it exists
+      try {
+        await csvService.updateVehicleStatus(order.vehicle_id, 'Free');
+      } catch (error) {
+        console.error('Error freeing old vehicle:', error);
+      }
+    }
+    
+    // Update order with vehicle info
+    order.vehicle_id = vehicleId ? vehicleId.toString() : '';
+    order.vehicle_number = vehicleNumber;
+    
+    // Save order
+    await csvService.writeOrder(order);
+    
+    // Mark new vehicle as booked if vehicleId is provided
+    if (vehicleId && vehicleId.trim() !== '') {
+      try {
+        await csvService.updateVehicleStatus(vehicleId, 'Booked');
+      } catch (error) {
+        console.error('Error updating vehicle status:', error);
+        // Continue even if vehicle status update fails
+      }
+    }
+    
+    return res.json({
+      success: true,
+      message: 'Vehicle assigned successfully',
+      order: order
+    });
+  } catch (error) {
+    console.error('Assign vehicle error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});
+
 // POST /api/update-order-status - Update order status
 router.post('/update-order-status', async (req, res) => {
   try {
@@ -678,6 +742,15 @@ router.post('/update-order-status', async (req, res) => {
           message: 'Order cannot be cancelled after all approval stages have been completed'
         });
       }
+    }
+    
+    // NEW VALIDATION: Block approval/start if no vehicle is assigned
+    if ((newStatus === 'In-Progress' || newStatus === 'En-Route') && 
+        (!orderBeforeUpdate.vehicle_id || orderBeforeUpdate.vehicle_id === '')) {
+      return res.status(400).json({
+        success: false,
+        message: 'Vehicle assignment is mandatory before approving or starting this trip.'
+      });
     }
     
     // Prepare update data with audit fields
@@ -1898,21 +1971,34 @@ router.post('/workflow-action', async (req, res) => {
         }
       }
     } else if (isOrderCompleted && currentStatus !== 'COMPLETED' && currentStatus !== 'REJECTED' && currentStatus !== 'CANCELLED' && currentStatus !== 'CANCELED') {
+      console.log(`[Status Sync] Order ${orderId}: All segments approved. Forcing primary status to COMPLETED.`);
       console.log(`[Workflow Status Update] Order ${orderId} workflow is COMPLETED - updating order status to COMPLETED`);
       console.log(`[Workflow Status Update] Previous status: ${order.order_status}, New status: COMPLETED`);
       order.order_status = 'COMPLETED';
       
-      // Free the vehicle when order is completed
-      if (order.vehicle_id) {
+      // CRITICAL: Automatically free the vehicle when order is completed
+      if (order.vehicle_id && order.vehicle_id.trim() !== '') {
         try {
           await csvService.updateVehicleStatus(order.vehicle_id, 'Free');
-          console.log(`[Workflow Status Update] Vehicle ${order.vehicle_id} freed`);
+          console.log(`[Status Sync] Vehicle ${order.vehicle_id} automatically freed for completed order ${orderId}`);
         } catch (error) {
-          console.error('Error freeing vehicle on completion:', error);
+          console.error(`[Status Sync] Error freeing vehicle ${order.vehicle_id}:`, error);
         }
       }
     } else if (isOrderCompleted && currentStatus === 'COMPLETED') {
       console.log(`[Workflow Status Check] Order ${orderId} is already COMPLETED - no status change needed`);
+      // Ensure vehicle is freed even if status was already COMPLETED
+      if (order.vehicle_id && order.vehicle_id.trim() !== '' && currentStatus === 'COMPLETED') {
+        try {
+          const vehicle = await csvService.getVehicleById(order.vehicle_id);
+          if (vehicle && vehicle.is_busy === true) {
+            await csvService.updateVehicleStatus(order.vehicle_id, 'Free');
+            console.log(`[Status Sync] Vehicle ${order.vehicle_id} freed (was already COMPLETED but vehicle still booked)`);
+          }
+        } catch (error) {
+          console.error(`[Status Sync] Error checking/freeing vehicle:`, error);
+        }
+      }
     } else if (!isOrderCompleted) {
       console.log(`[Workflow Status Check] Order ${orderId} is not yet completed - remaining in ${order.order_status}`);
     }

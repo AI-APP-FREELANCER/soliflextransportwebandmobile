@@ -1318,6 +1318,10 @@ async function writeOrder(order) {
   if (!order.original_total_toll_charges) order.original_total_toll_charges = '';
   if (!order.original_segment_count) order.original_segment_count = '';
   
+  // Ensure vehicle fields default to empty string if null/undefined to prevent CSV formatting errors
+  if (!order.vehicle_id || order.vehicle_id === null || order.vehicle_id === undefined) order.vehicle_id = '';
+  if (!order.vehicle_number || order.vehicle_number === null || order.vehicle_number === undefined) order.vehicle_number = '';
+  
   // Ensure auditing fields have defaults if not set
   if (!order.approved_timestamp) order.approved_timestamp = '';
   if (!order.approved_by_member) order.approved_by_member = '';

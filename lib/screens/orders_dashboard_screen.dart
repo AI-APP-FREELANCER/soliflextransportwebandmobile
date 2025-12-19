@@ -153,46 +153,70 @@ class _OrdersDashboardScreenState extends State<OrdersDashboardScreen> {
     if (_selectedFilter == 'All') {
       return orders;
     }
-    // CRITICAL FIX: Use effective status for filtering with normalized comparison
+    
+    // CRITICAL FIX: Use workflow completion check as source of truth
+    // This ensures orders are filtered based on actual workflow state, not stale order_status
     return orders.where((order) {
-      final effectiveStatus = _workflowService.getEffectiveOrderStatus(order);
-      // Normalize both sides to title case for comparison
+      // 1. Determine effective status by checking workflow completion directly
+      final bool isWorkflowDone = _workflowService.isOrderCompleted(order);
+      final bool isWorkflowRejected = _workflowService.isOrderRejected(order);
+      
+      // 2. Use workflow completion check as primary source of truth
+      String effectiveStatus;
+      if (isWorkflowRejected) {
+        effectiveStatus = 'REJECTED';
+      } else if (isWorkflowDone) {
+        effectiveStatus = 'COMPLETED'; // Use uppercase to match getEffectiveOrderStatus
+      } else {
+        // Fallback to order status if workflow is not complete
+        effectiveStatus = order.orderStatus;
+      }
+      
+      // 3. Normalize both the effective status and the active tab filter
       final normalizedEffectiveStatus = _normalizeStatusForFilter(effectiveStatus);
       final normalizedFilter = _normalizeStatusForFilter(_selectedFilter);
+      
+      // 4. Compare the normalized strings (case-insensitive matching)
       return normalizedEffectiveStatus == normalizedFilter;
     }).toList();
   }
 
   /// Normalizes status strings to match filter tab format (title case)
   /// Handles: 'COMPLETED' -> 'Completed', 'REJECTED' -> 'Cancelled', etc.
+  /// This ensures case-insensitive matching between backend status and filter tabs
   String _normalizeStatusForFilter(String status) {
-    final normalized = status.trim();
+    final normalized = status.trim().toUpperCase();
     
-    // Handle workflow-derived uppercase statuses
-    if (normalized.toUpperCase() == 'COMPLETED') {
+    // Explicit mapping for terminal states (workflow-derived uppercase statuses)
+    if (normalized == 'COMPLETED') {
       return 'Completed';
     }
-    if (normalized.toUpperCase() == 'REJECTED' || normalized.toUpperCase() == 'CANCELLED' || normalized.toUpperCase() == 'CANCELED') {
+    if (normalized == 'REJECTED' || normalized == 'CANCELLED' || normalized == 'CANCELED') {
       return 'Cancelled'; // REJECTED orders show in Cancelled tab
     }
     
-    // Handle standard statuses (already in correct format)
-    switch (normalized) {
-      case 'Open':
-      case 'In-Progress':
-      case 'En-Route':
-      case 'Completed':
-      case 'Cancelled':
-        return normalized;
-      default:
-        // For any other status, try to match by case-insensitive comparison
-        final lower = normalized.toLowerCase();
-        if (lower == 'completed') return 'Completed';
-        if (lower == 'cancelled' || lower == 'canceled' || lower == 'rejected') return 'Cancelled';
-        if (lower == 'in-progress' || lower == 'in progress') return 'In-Progress';
-        if (lower == 'en-route' || lower == 'en route') return 'En-Route';
-        return normalized; // Return as-is if no match
+    // Mapping for active states (case-insensitive)
+    if (normalized == 'OPEN') return 'Open';
+    if (normalized == 'IN-PROGRESS' || normalized == 'IN PROGRESS') return 'In-Progress';
+    if (normalized == 'EN-ROUTE' || normalized == 'EN ROUTE') return 'En-Route';
+    
+    // Fallback: if already in correct format, return as-is
+    final original = status.trim();
+    if (original == 'Open' || original == 'In-Progress' || original == 'En-Route' || 
+        original == 'Completed' || original == 'Cancelled') {
+      return original;
     }
+    
+    // Final fallback: try case-insensitive match
+    final lower = normalized.toLowerCase();
+    if (lower == 'completed') return 'Completed';
+    if (lower == 'cancelled' || lower == 'canceled' || lower == 'rejected') return 'Cancelled';
+    if (lower == 'in-progress' || lower == 'in progress') return 'In-Progress';
+    if (lower == 'en-route' || lower == 'en route') return 'En-Route';
+    if (lower == 'open') return 'Open';
+    
+    // Return original if no match found
+    return status.trim();
   }
 
   Color _getStatusColor(String status) {
@@ -641,14 +665,14 @@ class _OrdersDashboardScreenState extends State<OrdersDashboardScreen> {
                       ),
                     ),
                   ] else ...[
-                    Icon(Icons.local_shipping, size: 9, color: AppTheme.textSecondary),
+                    Icon(Icons.warning_amber_rounded, size: 9, color: Colors.orange),
                     const SizedBox(width: 2),
-                    Text(
-                      'No Vehicle Assigned',
-                      style: const TextStyle(
+                    const Text(
+                      'Assignment Pending',
+                      style: TextStyle(
                         fontSize: 9,
-                        color: AppTheme.textSecondary,
-                        fontStyle: FontStyle.italic,
+                        color: Colors.orange,
+                        fontWeight: FontWeight.w500,
                       ),
                     ),
                   ],
@@ -1056,6 +1080,14 @@ class OrderDetailModal extends StatelessWidget {
   }
 
   Future<void> _updateOrderStatus(BuildContext context, String newStatus) async {
+    // Check if vehicle is required and missing
+    if ((newStatus == 'In-Progress' || newStatus == 'En-Route') && 
+        (order.vehicleId == null || order.vehicleId!.isEmpty)) {
+      // Show vehicle selection dialog
+      await _showVehicleSelectionDialog(context, newStatus);
+      return;
+    }
+    
     final orderProvider = Provider.of<OrderProvider>(context, listen: false);
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     final userId = authProvider.user?.userId;
@@ -1076,6 +1108,115 @@ class OrderDetailModal extends StatelessWidget {
       if (result['success'] == true) {
         onStatusUpdate();
         Navigator.of(context).pop();
+      }
+    }
+  }
+
+  Future<void> _showVehicleSelectionDialog(BuildContext context, String newStatus) async {
+    // Get order's total weight for vehicle matching
+    final totalWeight = order.getTotalWeight();
+    
+    // Show dialog with vehicle selection
+    final selectedVehicle = await showDialog<VehicleModel?>(
+      context: context,
+      builder: (dialogContext) => _VehicleSelectionDialog(
+        order: order,
+        totalWeight: totalWeight,
+        apiService: _apiService,
+      ),
+    );
+    
+    if (selectedVehicle == null || !context.mounted) {
+      // User cancelled or no vehicle selected
+      return;
+    }
+    
+    // Show loading indicator
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Assigning vehicle and approving order...'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+    
+    try {
+      // Assign vehicle to order
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      final userId = authProvider.user?.userId;
+      
+      final assignResult = await _apiService.assignVehicleToOrder(
+        orderId: order.orderId,
+        vehicleId: selectedVehicle.vehicleId,
+        vehicleNumber: selectedVehicle.vehicleNumber,
+        vehicleType: selectedVehicle.vehicleType.isNotEmpty ? selectedVehicle.vehicleType : selectedVehicle.type,
+        capacityKg: selectedVehicle.capacityKg,
+        userId: userId,
+      );
+      
+      if (!context.mounted) return;
+      
+      if (assignResult['success'] == true) {
+        // Vehicle assigned successfully, now update order status directly
+        // IMPORTANT: Call provider directly to avoid the vehicle check in _updateOrderStatus
+        final orderProvider = Provider.of<OrderProvider>(context, listen: false);
+        
+        final statusResult = await orderProvider.updateOrderStatus(
+          orderId: order.orderId,
+          newStatus: newStatus,
+          userId: userId,
+        );
+        
+        if (!context.mounted) return;
+        
+        if (statusResult['success'] == true) {
+          // Success: Show message, refresh, then close modal
+          if (context.mounted) {
+            // Show success message first
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Vehicle assigned and order approved successfully!'),
+                backgroundColor: Colors.green,
+                duration: Duration(seconds: 3),
+              ),
+            );
+            
+            // Refresh orders list
+            onStatusUpdate();
+            
+            // Close order detail modal
+            Navigator.of(context).pop();
+          }
+        } else {
+          // Status update failed
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(statusResult['message'] ?? 'Failed to approve order'),
+              backgroundColor: Colors.red,
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
+      } else {
+        // Vehicle assignment failed
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(assignResult['message'] ?? 'Failed to assign vehicle'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: ${e.toString()}'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
+        );
       }
     }
   }
@@ -1521,8 +1662,12 @@ class OrderDetailModal extends StatelessWidget {
                     width: double.infinity,
                     child: ElevatedButton.icon(
                       onPressed: () => _updateOrderStatus(context, 'In-Progress'),
-                      icon: const Icon(Icons.check),
-                      label: const Text('Approve Order'),
+                      icon: Icon(order.vehicleId == null || order.vehicleId!.isEmpty 
+                          ? Icons.local_shipping 
+                          : Icons.check),
+                      label: Text(order.vehicleId == null || order.vehicleId!.isEmpty 
+                          ? 'Assign Vehicle & Approve' 
+                          : 'Approve Order'),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.green,
                         foregroundColor: Colors.white,
@@ -1776,6 +1921,336 @@ class OrderDetailModal extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// Vehicle Selection Dialog for Order Approval
+class _VehicleSelectionDialog extends StatefulWidget {
+  final OrderModel order;
+  final int totalWeight;
+  final ApiService apiService;
+
+  const _VehicleSelectionDialog({
+    required this.order,
+    required this.totalWeight,
+    required this.apiService,
+  });
+
+  @override
+  State<_VehicleSelectionDialog> createState() => _VehicleSelectionDialogState();
+}
+
+class _VehicleSelectionDialogState extends State<_VehicleSelectionDialog> {
+  List<VehicleModel> _matchedVehicles = [];
+  VehicleModel? _selectedVehicle;
+  bool _showManualVehicleEntry = false;
+  bool _isMatchingVehicles = false;
+  
+  // Manual vehicle entry controllers
+  final _manualVehicleNumberController = TextEditingController();
+  final _manualVehicleTypeController = TextEditingController();
+  final _manualCapacityController = TextEditingController();
+  String? _manualVehicleType;
+  
+  final List<String> _vehicleTypeOptions = ['Open', 'Closed', 'Container'];
+
+  @override
+  void initState() {
+    super.initState();
+    _matchVehicles();
+  }
+
+  @override
+  void dispose() {
+    _manualVehicleNumberController.dispose();
+    _manualVehicleTypeController.dispose();
+    _manualCapacityController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _matchVehicles() async {
+    setState(() {
+      _isMatchingVehicles = true;
+      _showManualVehicleEntry = false;
+    });
+
+    try {
+      final result = await widget.apiService.matchVehicles(widget.totalWeight);
+      if (result['success'] == true) {
+        setState(() {
+          _matchedVehicles = result['vehicles'] as List<VehicleModel>;
+          _selectedVehicle = null;
+          if (_matchedVehicles.isEmpty) {
+            _showManualVehicleEntry = true;
+          }
+        });
+      }
+    } catch (e) {
+      // Handle error
+    } finally {
+      setState(() {
+        _isMatchingVehicles = false;
+      });
+    }
+  }
+
+  void _handleConfirm() {
+    if (_selectedVehicle != null) {
+      Navigator.of(context).pop(_selectedVehicle);
+    } else if (_showManualVehicleEntry) {
+      if (_manualVehicleNumberController.text.trim().isEmpty ||
+          _manualVehicleType == null ||
+          _manualCapacityController.text.trim().isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please complete all manual vehicle entry fields'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+      
+      // Create a manual vehicle entry
+      final manualVehicle = VehicleModel(
+        vehicleId: '',
+        vehicleNumber: _manualVehicleNumberController.text.trim(),
+        type: _manualVehicleType!,
+        capacityKg: int.tryParse(_manualCapacityController.text.trim()) ?? 0,
+        vehicleType: _manualVehicleType!,
+        vendorVehicle: 'manual_entry',
+        isBusy: false,
+      );
+      Navigator.of(context).pop(manualVehicle);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please select a vehicle or use manual entry'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: AppTheme.darkCard,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: const BorderSide(color: AppTheme.darkBorder, width: 0.5),
+      ),
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 500, maxHeight: 600),
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.all(20.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Assign Vehicle to Order',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: AppTheme.textPrimary,
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close, color: AppTheme.textSecondary),
+                      onPressed: () => Navigator.of(context).pop(),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Order ${widget.order.orderId} - Total Weight: ${widget.totalWeight} kg',
+                  style: const TextStyle(
+                    fontSize: 14,
+                    color: AppTheme.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                if (_isMatchingVehicles)
+                  const Center(child: CircularProgressIndicator())
+                else if (_matchedVehicles.isEmpty && !_showManualVehicleEntry)
+                  Card(
+                    color: Colors.orange.shade50,
+                    child: Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Column(
+                        children: [
+                          const Text(
+                            'No suitable vehicles found',
+                            style: TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                          const SizedBox(height: 8),
+                          const Text(
+                            'Use the "Add Manual Truck Entry" button below.',
+                            style: TextStyle(fontSize: 14),
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                else
+                  ...(_matchedVehicles.map((vehicle) => Padding(
+                    padding: const EdgeInsets.only(bottom: 12.0),
+                    child: _buildVehicleCard(vehicle),
+                  ))),
+                const SizedBox(height: 16),
+                Card(
+                  color: Colors.orange.shade50,
+                  child: ListTile(
+                    leading: const Icon(Icons.add_circle, color: Colors.orange),
+                    title: const Text('Add Manual Truck Entry'),
+                    onTap: () {
+                      setState(() {
+                        _showManualVehicleEntry = !_showManualVehicleEntry;
+                        if (_showManualVehicleEntry) {
+                          _selectedVehicle = null;
+                        }
+                      });
+                    },
+                  ),
+                ),
+                if (_showManualVehicleEntry) ...[
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: _manualVehicleNumberController,
+                    decoration: const InputDecoration(
+                      labelText: 'Vehicle Number',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  DropdownButtonFormField<String>(
+                    value: _manualVehicleType,
+                    decoration: const InputDecoration(
+                      labelText: 'Vehicle Type',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: _vehicleTypeOptions.map((type) {
+                      return DropdownMenuItem(
+                        value: type,
+                        child: Text(type),
+                      );
+                    }).toList(),
+                    onChanged: (value) {
+                      setState(() {
+                        _manualVehicleType = value;
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: _manualCapacityController,
+                    decoration: const InputDecoration(
+                      labelText: 'Capacity (kg)',
+                      border: OutlineInputBorder(),
+                    ),
+                    keyboardType: TextInputType.number,
+                  ),
+                ],
+                const SizedBox(height: 24),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: const Text('Cancel'),
+                    ),
+                    const SizedBox(width: 8),
+                    ElevatedButton(
+                      onPressed: _handleConfirm,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green,
+                        foregroundColor: Colors.white,
+                      ),
+                      child: const Text('Assign & Continue'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildVehicleCard(VehicleModel vehicle) {
+    final isSelected = _selectedVehicle?.vehicleId == vehicle.vehicleId;
+    final isOptimal = vehicle.utilizationPercentage != null && 
+                      vehicle.utilizationPercentage! >= 80 && 
+                      vehicle.utilizationPercentage! <= 100;
+
+    return Card(
+      elevation: isSelected ? 4 : 1,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+          color: isSelected 
+              ? AppTheme.primaryOrange 
+              : (isOptimal ? Colors.green : Colors.grey.shade300),
+          width: isSelected ? 2 : 1,
+        ),
+      ),
+      child: InkWell(
+        onTap: () {
+          setState(() {
+            _selectedVehicle = vehicle;
+            _showManualVehicleEntry = false;
+          });
+        },
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    vehicle.vehicleNumber,
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: isSelected ? AppTheme.primaryOrange : AppTheme.textPrimary,
+                    ),
+                  ),
+                  if (isSelected)
+                    const Icon(Icons.check_circle, color: AppTheme.primaryOrange),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Text('Type: ${vehicle.vehicleType.isNotEmpty ? vehicle.vehicleType : vehicle.type}'),
+                  const SizedBox(width: 16),
+                  Text('Capacity: ${vehicle.capacityKg} kg'),
+                ],
+              ),
+              if (vehicle.utilizationPercentage != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  'Utilization: ${vehicle.utilizationPercentage!.toStringAsFixed(1)}%',
+                  style: TextStyle(
+                    color: isOptimal ? Colors.green : Colors.orange,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
     );
   }
