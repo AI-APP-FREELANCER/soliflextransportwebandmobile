@@ -44,3 +44,10 @@ notification_id,order_id,recipient_department,notification_type,message,status,c
 43,Order-1043,Accounts Team,ORDER_CREATED,"New order created, pending for approval. Order ID: Order-1043",unread,2025-12-02T09:47:21.100+05:30,9
 44,Order-1043,Security-Factory 2,ORDER_APPROVED,"Vehicle entry/exit notification for JJ Traders, Soliflex unit-2. Order ID: Order-1043",unread,2025-12-02T09:47:45.026+05:30,9
 45,Order-1043,Stores Unit-IV/ soliflex unit-II,ORDER_APPROVED,"Material verification required for JJ Traders, Soliflex unit-2. Order ID: Order-1043",unread,2025-12-02T09:47:45.037+05:30,9
+46,Order-1044,Accounts Team,ORDER_CREATED,"New order created, pending for approval. Order ID: Order-1044",unread,2025-12-20T00:25:33.162+05:30,10
+47,Order-1044,Security-Factory 1,ORDER_APPROVED,"Vehicle entry/exit notification for Bright globle, Soliflex unit-1. Order ID: Order-1044",unread,2025-12-20T00:35:39.374+05:30,10
+48,Order-1044,Stores IAF Unit-1/ Soliflex unit-1,ORDER_APPROVED,"Material verification required for Bright globle, Soliflex unit-1. Order ID: Order-1044",unread,2025-12-20T00:35:39.377+05:30,10
+49,Order-1044,Fabric IAF unit-1 / Soliflex unit-1,ORDER_APPROVED,"Material verification required for Bright globle, Soliflex unit-1. Order ID: Order-1044",unread,2025-12-20T00:35:39.381+05:30,10
+50,Order-1045,Accounts Team,ORDER_CREATED,"New order created, pending for approval. Order ID: Order-1045",unread,2025-12-20T00:36:14.739+05:30,11
+51,Order-1045,Security-Factory 2,ORDER_APPROVED,"Vehicle entry/exit notification for Bhagyashree, Soliflex unit-2. Order ID: Order-1045",unread,2025-12-20T00:36:33.104+05:30,11
+52,Order-1045,Stores Unit-IV/ soliflex unit-II,ORDER_APPROVED,"Material verification required for Bhagyashree, Soliflex unit-2. Order ID: Order-1045",unread,2025-12-20T00:36:33.109+05:30,11
