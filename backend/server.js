@@ -60,9 +60,9 @@ const corsOptions = {
     if (NODE_ENV === 'production') {
       // Add your production domains here
       const allowedOrigins = [
-        'https://yourdomain.com',
-        'https://www.yourdomain.com',
-        // Add your VM domain/IP here
+        'https://transport.soliflexpackaging.com',
+        'http://transport.soliflexpackaging.com',
+        // Add additional domains if needed
       ];
       
       // Allow requests with no origin (mobile apps, Postman, etc.)
