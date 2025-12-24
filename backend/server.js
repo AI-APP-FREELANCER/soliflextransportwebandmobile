@@ -20,7 +20,7 @@ app.use(helmet({
       styleSrc: ["'self'", "'unsafe-inline'"],
       scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"], // Required for Flutter web
       imgSrc: ["'self'", "data:", "https:"],
-      connectSrc: ["'self'"],
+      connectSrc: ["'self'", "https://transport.soliflexpackaging.com", "http://transport.soliflexpackaging.com"], // Allow API connections
       fontSrc: ["'self'", "data:"],
       objectSrc: ["'none'"],
       mediaSrc: ["'self'"],
