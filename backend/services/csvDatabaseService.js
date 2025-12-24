@@ -1068,13 +1068,7 @@ async function calculateInvoiceRateForSegment(sourceLocation, destinationLocatio
       if (isNaN(tollCharges)) tollCharges = 0;
     }
 
-    // Part 1: Log calculation details for debugging
-    console.log(`[Rate Calculation] Segment: ${sourceLocation} → ${destinationLocation}`);
-    console.log(`  Rate Type: ${usePickRates ? 'Pick' : 'Drop'}${forceDropRates ? ' (Multiple Trip - forced Drop)' : ''}`);
-    console.log(`  Weight: ${materialWeight} kg (Bracket: ${weightBracket})`);
-    console.log(`  Vendor: ${vendor?.vendor_name || 'N/A'}`);
-    console.log(`  Invoice Amount: ₹${invoiceAmount}`);
-    console.log(`  Toll Charges: ₹${tollCharges}`);
+    // Rate calculation completed
 
     return {
       invoice_amount: invoiceAmount,

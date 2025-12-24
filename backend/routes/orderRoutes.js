@@ -194,7 +194,6 @@ router.post('/create-order', async (req, res) => {
         // Recategorize: Both are Factories -> Internal Transfer
         // But still generate A->B->A segments (same structure)
         tripType = 'Internal-Transfer';
-        console.log(`[Round Trip Recategorization] Both Starting Point (${sourceLocation}) and End Point (${destLocation}) are Factories. Recategorizing as 'Internal Transfer' but maintaining A->B->A segment structure.`);
       } else {
         // Part 1: Strict Validation for Round-Trip-Vendor
         // A (Starting Point) must be Factory, B (End Point) must be Vendor
@@ -216,7 +215,6 @@ router.post('/create-order', async (req, res) => {
         }
         
         // Validation passed: A is Factory, B is Vendor
-        console.log(`[Round Trip Validation] ✓ Valid Round Trip: Factory (${sourceLocation}) -> Vendor (${destLocation})`);
       }
       
       // Part 3: Final Segment Structure Guarantee
@@ -259,11 +257,7 @@ router.post('/create-order', async (req, res) => {
       finalSource = sourceLocation; // Starting Point (A)
       finalDestination = sourceLocation; // Round trip always ends at original starting point (A)
       
-      // Debug: Log segment structure for Round Trip
-      console.log(`[Round Trip] Segment structure created:`);
-      console.log(`  Segment 1: ${sourceLocation} → ${destLocation}`);
-      console.log(`  Segment 2: ${destLocation} → ${sourceLocation}`);
-      console.log(`  Final Source: ${finalSource}, Final Destination: ${finalDestination}`);
+      // Round Trip segment structure created
     } else if (tripType === 'Internal-Transfer') {
       // Internal Transfer: 1 segment from source to destination (factory locations only)
       if (!source || !destination) {
@@ -482,7 +476,7 @@ router.post('/create-order', async (req, res) => {
         });
       }
     } else {
-      console.log(`[Create Order] No vehicle assigned at creation for Order ${orderId}. Assignment required at approval.`);
+        // No vehicle assigned at creation - assignment required at approval
     }
     
     // Calculate order category based on trip segments
@@ -579,26 +573,14 @@ router.post('/create-order', async (req, res) => {
       if (!segment.workflow || !Array.isArray(segment.workflow) || segment.workflow.length === 0) {
         const location = segment.destination || segment.source || '';
         segment.workflow = csvService.initializeSegmentWorkflow(segment, location);
-        console.log(`[Create Order] Initialized workflow for Segment ${i + 1} (${segment.source} → ${segment.destination})`);
+        // Workflow initialized for segment
       }
     }
     
     // Update order with segments that now have workflows
     order.trip_segments = tripSegments;
     
-    // CRITICAL FIX: Log final order payload before saving
-    console.log(`[Create Order] Final Order Payload:`);
-    console.log(`  Order ID: ${order.order_id}`);
-    console.log(`  Trip Type: ${order.trip_type}`);
-    console.log(`  Material Weight: ${order.material_weight} kg`);
-    console.log(`  Material Type: ${order.material_type}`);
-    console.log(`  Total Weight: ${order.total_weight} kg`);
-    console.log(`  Total Invoice: ₹${order.total_invoice_amount}`);
-    console.log(`  Total Toll: ₹${order.total_toll_charges}`);
-    console.log(`  Vehicle ID: ${order.vehicle_id || 'N/A'}`);
-    console.log(`  Vehicle Number: ${order.vehicle_number || 'N/A'}`);
-    console.log(`  Segments Count: ${tripSegments.length}`);
-    console.log(`  Workflows Initialized: ${tripSegments.every(seg => seg.workflow && Array.isArray(seg.workflow) && seg.workflow.length > 0)}`);
+    // Order created successfully - no sensitive data logging in production
     
     // Save order
     await csvService.writeOrder(order);

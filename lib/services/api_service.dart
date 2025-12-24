@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, kDebugMode;
 import '../models/user_model.dart';
 import '../models/vendor_model.dart';
 import '../models/vehicle_model.dart';
@@ -182,7 +182,9 @@ class ApiService {
                 try {
                   return VendorModel.fromJson(v as Map<String, dynamic>);
                 } catch (e) {
-                  print('Error parsing vendor: $v, Error: $e');
+                  if (kDebugMode) {
+                    print('Error parsing vendor data');
+                  }
                   return null;
                 }
               })
@@ -761,7 +763,9 @@ class ApiService {
                 try {
                   return OrderModel.fromJson(o as Map<String, dynamic>);
                 } catch (e) {
-                  print('Error parsing order: $o, Error: $e');
+                  if (kDebugMode) {
+                    print('Error parsing order data');
+                  }
                   return null;
                 }
               })
@@ -821,7 +825,9 @@ class ApiService {
                 try {
                   return OrderModel.fromJson(o as Map<String, dynamic>);
                 } catch (e) {
-                  print('Error parsing order: $o, Error: $e');
+                  if (kDebugMode) {
+                    print('Error parsing order data');
+                  }
                   return null;
                 }
               })

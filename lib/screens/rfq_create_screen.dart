@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import '../providers/vendor_provider.dart';
@@ -109,8 +110,7 @@ class _RFQCreateScreenState extends State<RFQCreateScreen> {
         final vendorsList = response['vendors'] as List<dynamic>? ?? [];
         
         if (vendorsList.isNotEmpty) {
-          print('[RFQ Create] ✅ SUCCESS: Rate card loaded and accessible');
-          print('[RFQ Create]   Rate card records count: ${vendorsList.length}');
+          // Rate card loaded successfully
           
           // CRITICAL FIX: Extract vendor names from VendorModel objects
           final sampleVendors = vendorsList.take(3).map((v) {
@@ -122,16 +122,14 @@ class _RFQCreateScreenState extends State<RFQCreateScreen> {
             }
             return 'N/A';
           }).join(', ');
-          
-          print('[RFQ Create]   Sample vendors: $sampleVendors');
         } else {
-          print('[RFQ Create] ❌ FAILURE: Rate card is empty (no vendors found)');
+          // Rate card is empty
         }
       } else {
-        print('[RFQ Create] ❌ FAILURE: Rate card not accessible (API error)');
+        // Rate card not accessible
       }
     } catch (e) {
-      print('[RFQ Create] ❌ FAILURE: Error loading rate card: $e');
+      // Error loading rate card
     }
   }
 
@@ -191,7 +189,6 @@ class _RFQCreateScreenState extends State<RFQCreateScreen> {
     if (_selectedTripType == 'Multiple-Trip-Vendor') {
       final totalWeight = _calculateMultipleTripTotalWeight();
       if (totalWeight > 0) {
-        print('[RFQ Create] Multiple Trip total weight: $totalWeight kg, triggering vehicle matching...');
         _matchVehicles(totalWeight);
       } else {
         setState(() {
@@ -223,26 +220,17 @@ class _RFQCreateScreenState extends State<RFQCreateScreen> {
         final invoiceAmount = result['invoice_amount'] as int? ?? 0;
         final tollCharges = result['toll_charges'] as int? ?? 0;
         
-        // CRITICAL FIX: Log rate card result for every segment calculation
-        print('[RFQ Create] Rate Card Result for Segment ($source → ${destination ?? 'N/A'}):');
-        print('  Invoice Amount: ₹$invoiceAmount (${invoiceAmount == 0 ? 'BLANK/ZERO' : 'VALID'})');
-        print('  Toll Charges: ₹$tollCharges (${tollCharges == 0 ? 'BLANK/ZERO' : 'VALID'})');
-        print('  Weight: $weight kg');
-        print('  Source: $source');
-        print('  Destination: ${destination ?? 'N/A'}');
-        print('  Trip Type: ${_selectedTripType == 'Multiple-Trip-Vendor' ? 'Multiple-Trip-Vendor (Drop rates)' : 'Other'}');
+        // Rate calculation completed
         
         return {
           'invoice_amount': invoiceAmount,
           'toll_charges': tollCharges,
         };
       } else {
-        print('[RFQ Create] ⚠️ Rate calculation failed for segment: $source');
-        print('  Error: ${result['message'] ?? 'Unknown error'}');
+        // Rate calculation failed
       }
     } catch (e) {
-      // CRITICAL FIX: Log error instead of silently handling
-      print('[RFQ Create] ❌ Error calculating invoice for segment: $e');
+      // Error calculating invoice for segment
     }
     
     // CRITICAL FIX: Default to 0 (not null) for numeric output
@@ -305,11 +293,9 @@ class _RFQCreateScreenState extends State<RFQCreateScreen> {
         final calculatedToll = result['toll_charges'] as int? ?? 0;
         
         // CRITICAL FIX: Log rate card result for every calculation
-        print('[RFQ Create] Rate Card Result for ${_selectedSource}:');
-        print('  Invoice Amount: ₹${calculatedInvoice} (${calculatedInvoice == 0 ? 'BLANK/ZERO' : 'VALID'})');
-        print('  Toll Charges: ₹${calculatedToll} (${calculatedToll == 0 ? 'BLANK/ZERO' : 'VALID'})');
-        print('  Weight: $weight kg');
-        print('  Source: $_selectedSource');
+        if (kDebugMode) {
+          // Debug logging only
+        }
         
         // CRITICAL FIX: Ensure numeric output - default to 0 if null
         setState(() {
@@ -457,10 +443,6 @@ class _RFQCreateScreenState extends State<RFQCreateScreen> {
       }
 
       // Step 5: Validate vehicle selection or manual entry
-      print('[RFQ Create] Step 5: Checking vehicle selection...');
-      print('[RFQ Create]   - Selected Vehicle: ${_selectedVehicle?.vehicleId} / ${_selectedVehicle?.vehicleNumber}');
-      print('[RFQ Create]   - Show Manual Entry: $_showManualVehicleEntry');
-      
       bool hasVehicle = false;
       String? vehicleId;
       String? vehicleNumber;
@@ -469,17 +451,10 @@ class _RFQCreateScreenState extends State<RFQCreateScreen> {
         hasVehicle = true;
         vehicleId = _selectedVehicle!.vehicleId;
         vehicleNumber = _selectedVehicle!.vehicleNumber;
-        print('[RFQ Create]   ✓ Vehicle selected: $vehicleNumber (ID: $vehicleId)');
       } else if (_showManualVehicleEntry) {
-        print('[RFQ Create]   - Checking manual entry fields...');
-        print('[RFQ Create]     - Manual Vehicle Number: ${_manualVehicleNumberController.text.trim()}');
-        print('[RFQ Create]     - Manual Vehicle Type: $_manualVehicleType');
-        print('[RFQ Create]     - Manual Capacity: ${_manualCapacityController.text.trim()}');
-        
         if (_manualVehicleNumberController.text.trim().isEmpty ||
             _manualVehicleType == null ||
             _manualCapacityController.text.trim().isEmpty) {
-          print('[RFQ Create]   ERROR: Manual entry incomplete');
           _showErrorModal('Incomplete Manual Entry', 
               'Please complete all manual vehicle entry fields:\n'
               '- Vehicle Number\n'
@@ -489,29 +464,23 @@ class _RFQCreateScreenState extends State<RFQCreateScreen> {
         }
         hasVehicle = true;
         vehicleNumber = _manualVehicleNumberController.text.trim();
-        print('[RFQ Create]   ✓ Manual vehicle entry complete: $vehicleNumber');
       }
 
       // Vehicle selection is now optional - order can be created without vehicle
       // Vehicle assignment will be required during Admin/Accounts approval
       if (!hasVehicle) {
-        print('[RFQ Create]   INFO: No vehicle selected. Order will be created without vehicle assignment.');
         vehicleId = null;
         vehicleNumber = null;
       }
 
       // Step 6: Get user
-      print('[RFQ Create] Step 6: Getting user information...');
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
       final user = authProvider.user;
 
       if (user == null) {
-        print('[RFQ Create] ERROR: User not found in auth provider');
         _showErrorModal('Authentication Error', 'User not found. Please login again.');
         return;
       }
-
-      print('[RFQ Create]   ✓ User found: ${user.fullName} (ID: ${user.userId})');
 
       // Step 7: Prepare RFQ data based on trip type
       // CRITICAL FIX: Handle null destination for Multiple Trip
@@ -647,12 +616,7 @@ class _RFQCreateScreenState extends State<RFQCreateScreen> {
         finalDestination = _selectedTripType == 'Round-Trip-Vendor' ? sourceValue : destination;
       }
 
-      print('[RFQ Create] Step 7.2: RFQ Data Prepared:');
-      print('[RFQ Create]   - Trip Type: $_selectedTripType');
-      print('[RFQ Create]   - User ID: ${user.userId}');
-      print('[RFQ Create]   - Source (for API): $source');
-      print('[RFQ Create]   - Destination (for API): ${_selectedTripType == 'Round-Trip-Vendor' ? destination : finalDestination}');
-      print('[RFQ Create]   - Final Destination (display only): $finalDestination');
+      // RFQ data prepared
       
       // CRITICAL VALIDATION: Verify source and destination are different before API submission
       if (_selectedTripType == 'Round-Trip-Vendor' && source == destination) {
@@ -673,8 +637,7 @@ class _RFQCreateScreenState extends State<RFQCreateScreen> {
       if (segments != null) {
         print('[RFQ Create]   - Segments Count: ${segments.length}');
       }
-      print('[RFQ Create]   - Vehicle ID: ${vehicleId ?? 'N/A (Manual Entry)'}');
-      print('[RFQ Create]   - Vehicle Number: $vehicleNumber');
+        // Vehicle information prepared
 
       // Step 8: Create Order
       print('[RFQ Create] Step 8: Submitting Order to backend...');
@@ -778,20 +741,7 @@ class _RFQCreateScreenState extends State<RFQCreateScreen> {
         }
       }
       
-      // CRITICAL FIX: Log final payload before submission
-      print('[RFQ Create] Step 8.3: Final Payload Summary:');
-      print('[RFQ Create]   - Trip Type: $_selectedTripType');
-      print('[RFQ Create]   - Source: ${_selectedTripType != 'Multiple-Trip-Vendor' ? source : 'N/A (from segments)'}');
-      print('[RFQ Create]   - Destination: $apiDestination');
-      print('[RFQ Create]   - Material Weight: $materialWeight kg');
-      print('[RFQ Create]   - Material Type: $materialType');
-      print('[RFQ Create]   - Invoice Amount: ₹${finalInvoiceAmount ?? 0}');
-      print('[RFQ Create]   - Toll Charges: ₹${finalTollCharges ?? 0}');
-      print('[RFQ Create]   - Vehicle ID: ${vehicleId ?? 'N/A (Manual Entry)'}');
-      print('[RFQ Create]   - Vehicle Number: ${vehicleNumber ?? 'N/A (Manual Entry)'}');
-      if (segments != null) {
-        print('[RFQ Create]   - Segments Count: ${segments.length}');
-      }
+      // Submitting order
       
       final result = await orderProvider.createOrder(
         userId: user.userId,
@@ -1129,12 +1079,7 @@ class _RFQCreateScreenState extends State<RFQCreateScreen> {
       ),
       child: InkWell(
         onTap: () {
-          print('[RFQ Create] Vehicle selected:');
-          print('[RFQ Create]   - Vehicle ID: ${vehicle.vehicleId}');
-          print('[RFQ Create]   - Vehicle Number: ${vehicle.vehicleNumber}');
-          print('[RFQ Create]   - Type: ${vehicle.type}');
-          print('[RFQ Create]   - Capacity: ${vehicle.capacityKg} kg');
-          print('[RFQ Create]   - Utilization: ${vehicle.utilizationPercentage?.toStringAsFixed(1)}%');
+          // Vehicle selected
           
           setState(() {
             _selectedVehicle = vehicle;
@@ -1145,9 +1090,7 @@ class _RFQCreateScreenState extends State<RFQCreateScreen> {
             _manualCapacityController.clear();
           });
           
-          print('[RFQ Create]   ✓ Vehicle selection state updated');
-          print('[RFQ Create]   - _selectedVehicle is now: ${_selectedVehicle?.vehicleId}');
-          print('[RFQ Create]   - _showManualVehicleEntry is now: $_showManualVehicleEntry');
+          // Vehicle selection state updated
         },
         borderRadius: BorderRadius.circular(12),
         child: Padding(
