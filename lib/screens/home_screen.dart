@@ -17,7 +17,10 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+// Global route observer for home screen refresh
+final RouteObserver<PageRoute> homeRouteObserver = RouteObserver<PageRoute>();
+
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, RouteAware {
   String _selectedDateRange = 'Current Week';
   List<VehicleModel> _vehicles = [];
   bool _isLoadingVehicles = false;
@@ -25,11 +28,57 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     // Load orders and vehicles when home screen opens
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      Provider.of<OrderProvider>(context, listen: false).loadOrders();
-      _loadVehicles();
+      _refreshData();
     });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Subscribe to route changes
+    final route = ModalRoute.of(context);
+    if (route is PageRoute) {
+      homeRouteObserver.subscribe(this, route);
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    homeRouteObserver.unsubscribe(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Reload data when app comes back to foreground
+    if (state == AppLifecycleState.resumed) {
+      _refreshData();
+    }
+  }
+
+  // Called when the current route has been pushed.
+  @override
+  void didPush() {
+    _refreshData();
+  }
+
+  // Called when the top route has been popped off, and this route shows up.
+  @override
+  void didPopNext() {
+    // Refresh when navigating back to home screen
+    _refreshData();
+  }
+
+  Future<void> _refreshData() async {
+    final orderProvider = Provider.of<OrderProvider>(context, listen: false);
+    await orderProvider.loadOrders();
+    if (mounted) {
+      _loadVehicles();
+    }
   }
 
   Future<void> _loadVehicles() async {
@@ -93,6 +142,22 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         title: const Text('Soliflex Packaging - Home'),
         actions: [
+          // Refresh button
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: () async {
+              await _refreshData();
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Analytics refreshed'),
+                    duration: Duration(seconds: 1),
+                  ),
+                );
+              }
+            },
+            tooltip: 'Refresh Analytics',
+          ),
           // Notification badge
           const NotificationBadge(),
           // User info in top right corner
@@ -599,15 +664,32 @@ class _HomeScreenState extends State<HomeScreen> {
     };
   }
 
+  // Calculate status metrics - Normalize status for comparison
+  String _normalizeStatus(String status) {
+    return status.trim().toLowerCase().replaceAll('_', '-').replaceAll(' ', '-');
+  }
+
   // Calculate status metrics
   Map<String, int> _calculateStatusMetrics(List<OrderModel> orders) {
     return {
       'total': orders.length,
-      'open': orders.where((o) => o.orderStatus == 'Open').length,
-      'inProgress': orders.where((o) => o.orderStatus == 'In-Progress').length,
-      'enRoute': orders.where((o) => o.orderStatus == 'En-Route').length,
-      'completed': orders.where((o) => o.orderStatus == 'Completed').length,
-      'cancelled': orders.where((o) => o.orderStatus == 'Cancelled').length,
+      'open': orders.where((o) => _normalizeStatus(o.orderStatus) == 'open').length,
+      'inProgress': orders.where((o) {
+        final normalized = _normalizeStatus(o.orderStatus);
+        return normalized == 'in-progress' || normalized == 'inprogress';
+      }).length,
+      'enRoute': orders.where((o) {
+        final normalized = _normalizeStatus(o.orderStatus);
+        return normalized == 'en-route' || normalized == 'enroute';
+      }).length,
+      'completed': orders.where((o) {
+        final normalized = _normalizeStatus(o.orderStatus);
+        return normalized == 'completed' || normalized == 'complete';
+      }).length,
+      'cancelled': orders.where((o) {
+        final normalized = _normalizeStatus(o.orderStatus);
+        return normalized == 'cancelled' || normalized == 'canceled';
+      }).length,
     };
   }
 

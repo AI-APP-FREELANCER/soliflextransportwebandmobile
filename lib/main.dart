@@ -15,6 +15,7 @@ import 'screens/my_rfqs_screen.dart';
 import 'screens/approval_dashboard_screen.dart';
 import 'screens/orders_dashboard_screen.dart';
 import 'screens/notifications_screen.dart';
+import 'screens/home_screen.dart' show homeRouteObserver;
 
 void main() {
   runApp(const SoliflexApp());
@@ -43,6 +44,7 @@ class SoliflexApp extends StatelessWidget {
             title: 'Soliflex Packaging',
             debugShowCheckedModeBanner: false,
             theme: AppTheme.lightTheme,
+            navigatorObservers: [homeRouteObserver],
             initialRoute: initialRoute,
             routes: {
               '/login': (context) => const LoginScreen(),
