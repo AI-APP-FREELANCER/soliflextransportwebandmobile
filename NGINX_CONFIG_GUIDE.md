@@ -3,12 +3,12 @@
 ## Architecture Overview
 
 - **Nginx**: Receives traffic on port 80 (HTTP) → redirects to 443 (HTTPS)
-- **Backend API**: Running on `localhost:3000` (Node.js/Express)
+- **Backend API**: Running on `localhost:5000` (Node.js/Express)
 - **Frontend**: Running on `localhost:8081` (Flutter Web via http-server)
 
 ## Complete API Routes List
 
-All backend routes are prefixed with `/api` and run on port 3000.
+All backend routes are prefixed with `/api` and run on port 5000.
 
 ### Authentication Routes (`/api/*`)
 - `POST /api/register` - User registration
@@ -104,9 +104,9 @@ server {
     proxy_set_header X-Forwarded-Proto $scheme;
     proxy_cache_bypass $http_upgrade;
     
-    # Backend API - All /api/* routes go to backend (port 3000)
+    # Backend API - All /api/* routes go to backend (port 5000)
     location /api/ {
-        proxy_pass http://localhost:3000;
+        proxy_pass http://localhost:5000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -125,7 +125,7 @@ server {
     
     # Health check endpoint (no /api prefix)
     location /health {
-        proxy_pass http://localhost:3000;
+        proxy_pass http://localhost:5000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -166,7 +166,7 @@ server {
     
     # Backend API routes
     location /api/ {
-        proxy_pass http://localhost:3000;
+        proxy_pass http://localhost:5000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -175,7 +175,7 @@ server {
     
     # Health check
     location /health {
-        proxy_pass http://localhost:3000;
+        proxy_pass http://localhost:5000;
     }
     
     # Frontend (all other routes)
@@ -219,7 +219,7 @@ After updating nginx config:
 
 ## Important Notes
 
-1. **All API routes** are under `/api/*` and should proxy to `localhost:3000`
+1. **All API routes** are under `/api/*` and should proxy to `localhost:5000`
 2. **Health check** at `/health` (no `/api` prefix) also goes to backend
 3. **All other routes** (frontend) should proxy to `localhost:8081`
 4. **CORS** is already handled in the backend, but nginx can add additional headers if needed
@@ -227,6 +227,6 @@ After updating nginx config:
 
 ## Route Summary
 
-- **Backend (port 3000)**: `/api/*` and `/health`
+- **Backend (port 5000)**: `/api/*` and `/health`
 - **Frontend (port 8081)**: Everything else (`/`)
 

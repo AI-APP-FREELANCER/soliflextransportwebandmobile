@@ -8,7 +8,7 @@ module.exports = {
       exec_mode: 'fork',
       env: {
         NODE_ENV: 'production',
-        PORT: 3000
+        PORT: 5000
       },
       error_file: './logs/backend-error.log',
       out_file: './logs/backend-out.log',
