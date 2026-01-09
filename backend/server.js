@@ -34,20 +34,38 @@ app.use(helmet({
 // Rate Limiting - General API rate limiter
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per windowMs
-  message: 'Too many requests from this IP, please try again later.',
+  max: 500, // Increased to 500 requests per 15 minutes per IP (was 100)
+  message: { 
+    success: false, 
+    message: 'Too many requests from this IP, please try again later.' 
+  },
   standardHeaders: true,
   legacyHeaders: false,
+  handler: (req, res) => {
+    res.status(429).json({
+      success: false,
+      message: 'Too many requests from this IP, please try again later.'
+    });
+  },
 });
 
 // Rate Limiting - Strict limiter for authentication endpoints
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // Limit each IP to 5 login/register attempts per windowMs
-  message: 'Too many authentication attempts, please try again later.',
+  max: 10, // Increased to 10 attempts per 15 minutes per IP (was 5)
+  message: { 
+    success: false, 
+    message: 'Too many authentication attempts, please try again later.' 
+  },
   standardHeaders: true,
   legacyHeaders: false,
   skipSuccessfulRequests: true, // Don't count successful requests
+  handler: (req, res) => {
+    res.status(429).json({
+      success: false,
+      message: 'Too many authentication attempts, please try again later.'
+    });
+  },
 });
 
 // Apply general rate limiting to all routes

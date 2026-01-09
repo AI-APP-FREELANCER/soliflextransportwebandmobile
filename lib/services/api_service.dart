@@ -12,6 +12,52 @@ import '../models/notification_model.dart';
 import 'dart:html' as html if (dart.library.html) 'dart:html';
 
 class ApiService {
+  // Helper method to safely parse JSON responses and handle errors
+  static Map<String, dynamic> _parseResponse(http.Response response) {
+    // Check for rate limiting (429)
+    if (response.statusCode == 429) {
+      try {
+        final data = _parseResponse(response);
+        return {
+          'success': false,
+          'message': data['message'] ?? 'Too many requests. Please wait a moment and try again.',
+        };
+      } catch (e) {
+        return {
+          'success': false,
+          'message': 'Too many requests. Please wait a moment and try again.',
+        };
+      }
+    }
+
+    // Check for other error status codes
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      try {
+        final data = _parseResponse(response);
+        return {
+          'success': false,
+          'message': data['message'] ?? 'Request failed with status ${response.statusCode}',
+        };
+      } catch (e) {
+        return {
+          'success': false,
+          'message': 'Request failed with status ${response.statusCode}',
+        };
+      }
+    }
+
+    // Success - parse JSON
+    try {
+      final data = _parseResponse(response);
+      return data;
+    } catch (e) {
+      return {
+        'success': false,
+        'message': 'Invalid response format: ${e.toString()}',
+      };
+    }
+  }
+
   // Dynamically determine base URL based on platform
   // For web: Use current hostname and protocol (works for both localhost, VM IP, and subdomain)
   // For mobile: Use localhost or configured IP
@@ -60,7 +106,7 @@ class ApiService {
         }),
       );
 
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = _parseResponse(response);
       return {
         'success': data['success'] ?? false,
         'message': data['message'] ?? '',
@@ -92,7 +138,7 @@ class ApiService {
         }),
       );
 
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = _parseResponse(response);
       return {
         'success': data['success'] ?? false,
         'message': data['message'] ?? '',
@@ -115,7 +161,7 @@ class ApiService {
         headers: {'Content-Type': 'application/json'},
       );
 
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = _parseResponse(response);
       return {
         'success': data['success'] ?? false,
         'departments': data['departments'] != null
@@ -142,7 +188,7 @@ class ApiService {
         headers: {'Content-Type': 'application/json'},
       );
 
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = _parseResponse(response);
       return {
         'success': data['success'] ?? false,
         'user': data['user'] != null ? UserModel.fromJson(data['user'] as Map<String, dynamic>) : null,
@@ -165,15 +211,15 @@ class ApiService {
         headers: {'Content-Type': 'application/json'},
       );
 
-      if (response.statusCode != 200) {
+      final data = _parseResponse(response);
+      
+      if (data['success'] != true) {
         return {
           'success': false,
           'vendors': <VendorModel>[],
-          'message': 'Failed to load vendors: ${response.statusCode}',
+          'message': data['message'] ?? 'Failed to load vendors',
         };
       }
-
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
       
       if (data['success'] == true && data['vendors'] != null) {
         try {
@@ -232,7 +278,7 @@ class ApiService {
         headers: {'Content-Type': 'application/json'},
       );
 
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = _parseResponse(response);
       return {
         'success': data['success'] ?? false,
         'vehicles': data['vehicles'] != null
@@ -262,7 +308,7 @@ class ApiService {
         }),
       );
 
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = _parseResponse(response);
       return {
         'success': data['success'] ?? false,
         'vehicles': data['vehicles'] != null
@@ -306,7 +352,7 @@ class ApiService {
         }),
       );
 
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = _parseResponse(response);
       return {
         'success': data['success'] ?? false,
         'message': data['message'] ?? '',
@@ -329,7 +375,7 @@ class ApiService {
         headers: {'Content-Type': 'application/json'},
       );
 
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = _parseResponse(response);
       return {
         'success': data['success'] ?? false,
         'rfqs': data['rfqs'] != null
@@ -356,7 +402,7 @@ class ApiService {
         headers: {'Content-Type': 'application/json'},
       );
 
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = _parseResponse(response);
       return {
         'success': data['success'] ?? false,
         'rfqs': data['rfqs'] != null
@@ -386,7 +432,7 @@ class ApiService {
         }),
       );
 
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = _parseResponse(response);
       return {
         'success': data['success'] ?? false,
         'message': data['message'] ?? '',
@@ -413,7 +459,7 @@ class ApiService {
         }),
       );
 
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = _parseResponse(response);
       return {
         'success': data['success'] ?? false,
         'message': data['message'] ?? '',
@@ -439,7 +485,7 @@ class ApiService {
         }),
       );
 
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = _parseResponse(response);
       return {
         'success': data['success'] ?? false,
         'message': data['message'] ?? '',
@@ -465,7 +511,7 @@ class ApiService {
         }),
       );
 
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = _parseResponse(response);
       return {
         'success': data['success'] ?? false,
         'message': data['message'] ?? '',
@@ -525,15 +571,15 @@ class ApiService {
         body: jsonEncode(body),
       );
 
-      if (response.statusCode != 200) {
+      final data = _parseResponse(response);
+      
+      if (data['success'] != true) {
         return {
           'success': false,
-          'message': 'Failed to create order: ${response.statusCode}',
+          'message': data['message'] ?? 'Failed to create order',
           'order': null,
         };
       }
-
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
       return {
         'success': data['success'] ?? false,
         'message': data['message'] ?? '',
@@ -567,15 +613,15 @@ class ApiService {
         }),
       );
 
-      if (response.statusCode != 200) {
+      final data = _parseResponse(response);
+      
+      if (data['success'] != true) {
         return {
           'success': false,
-          'message': 'Failed to amend order: ${response.statusCode}',
+          'message': data['message'] ?? 'Failed to amend order',
           'order': null,
         };
       }
-
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
       return {
         'success': data['success'] ?? false,
         'message': data['message'] ?? '',
@@ -620,17 +666,16 @@ class ApiService {
         body: jsonEncode(body),
       );
 
-      if (response.statusCode != 200) {
-        final errorData = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = _parseResponse(response);
+      
+      if (data['success'] != true) {
         return {
           'success': false,
-          'message': errorData['message'] ?? 'Failed to calculate invoice rate',
+          'message': data['message'] ?? 'Failed to calculate invoice rate',
           'invoice_amount': 0,
           'toll_charges': 0,
         };
       }
-
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
       return {
         'success': data['success'] ?? false,
         'message': data['message'] ?? '',
@@ -670,16 +715,15 @@ class ApiService {
         }),
       );
 
-      if (response.statusCode != 200) {
-        final errorData = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = _parseResponse(response);
+      
+      if (data['success'] != true) {
         return {
           'success': false,
-          'message': errorData['message'] ?? 'Failed to assign vehicle: ${response.statusCode}',
+          'message': data['message'] ?? 'Failed to assign vehicle',
           'order': null,
         };
       }
-
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
       return {
         'success': data['success'] ?? false,
         'message': data['message'] ?? '',
@@ -713,15 +757,15 @@ class ApiService {
         }),
       );
 
-      if (response.statusCode != 200) {
+      final data = _parseResponse(response);
+      
+      if (data['success'] != true) {
         return {
           'success': false,
-          'message': 'Failed to update order status: ${response.statusCode}',
+          'message': data['message'] ?? 'Failed to update order status',
           'order': null,
         };
       }
-
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
       return {
         'success': data['success'] ?? false,
         'message': data['message'] ?? '',
@@ -746,15 +790,15 @@ class ApiService {
         headers: {'Content-Type': 'application/json'},
       );
 
-      if (response.statusCode != 200) {
+      final data = _parseResponse(response);
+      
+      if (data['success'] != true) {
         return {
           'success': false,
           'orders': <OrderModel>[],
-          'message': 'Failed to load orders: ${response.statusCode}',
+          'message': data['message'] ?? 'Failed to load orders',
         };
       }
-
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
       
       if (data['success'] == true && data['orders'] != null) {
         try {
@@ -808,15 +852,15 @@ class ApiService {
         headers: {'Content-Type': 'application/json'},
       );
 
-      if (response.statusCode != 200) {
+      final data = _parseResponse(response);
+      
+      if (data['success'] != true) {
         return {
           'success': false,
           'orders': <OrderModel>[],
-          'message': 'Failed to load user orders: ${response.statusCode}',
+          'message': data['message'] ?? 'Failed to load user orders',
         };
       }
-
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
       
       if (data['success'] == true && data['orders'] != null) {
         try {
@@ -870,23 +914,15 @@ class ApiService {
         headers: {'Content-Type': 'application/json'},
       );
 
-      if (response.statusCode == 404) {
+      final data = _parseResponse(response);
+      
+      if (data['success'] != true) {
         return {
           'success': false,
           'order': null,
-          'message': 'Order not found',
+          'message': data['message'] ?? 'Failed to load order',
         };
       }
-
-      if (response.statusCode != 200) {
-        return {
-          'success': false,
-          'order': null,
-          'message': 'Failed to load order: ${response.statusCode}',
-        };
-      }
-
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
       
       return {
         'success': data['success'] ?? false,
@@ -913,7 +949,7 @@ class ApiService {
         body: jsonEncode({'orderId': orderId}),
       );
 
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = _parseResponse(response);
       return {
         'success': data['success'] ?? false,
         'message': data['message'] ?? '',
@@ -955,7 +991,7 @@ class ApiService {
         }),
       );
 
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = _parseResponse(response);
       return {
         'success': data['success'] ?? false,
         'message': data['message'] ?? '',
@@ -983,7 +1019,7 @@ class ApiService {
         Uri.parse('$baseUrl/admin/users'),
         headers: {'Content-Type': 'application/json'},
       );
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = _parseResponse(response);
       return {
         'success': data['success'] ?? false,
         'users': data['users'] != null
@@ -1018,7 +1054,7 @@ class ApiService {
           'department': department,
         }),
       );
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = _parseResponse(response);
       return {
         'success': data['success'] ?? false,
         'message': data['message'] ?? '',
@@ -1052,7 +1088,7 @@ class ApiService {
           if (department != null) 'department': department,
         }),
       );
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = _parseResponse(response);
       return {
         'success': data['success'] ?? false,
         'message': data['message'] ?? '',
@@ -1076,7 +1112,7 @@ class ApiService {
         Uri.parse('$baseUrl/admin/users/$userId'),
         headers: {'Content-Type': 'application/json'},
       );
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = _parseResponse(response);
       return {
         'success': data['success'] ?? false,
         'message': data['message'] ?? '',
@@ -1100,7 +1136,7 @@ class ApiService {
         Uri.parse('$baseUrl/admin/vendors'),
         headers: {'Content-Type': 'application/json'},
       );
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = _parseResponse(response);
       return {
         'success': data['success'] ?? false,
         'vendors': data['vendors'] != null
@@ -1127,7 +1163,7 @@ class ApiService {
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode(vendorData),
       );
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = _parseResponse(response);
       return {
         'success': data['success'] ?? false,
         'message': data['message'] ?? '',
@@ -1153,7 +1189,7 @@ class ApiService {
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode(vendorData),
       );
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = _parseResponse(response);
       return {
         'success': data['success'] ?? false,
         'message': data['message'] ?? '',
@@ -1175,7 +1211,7 @@ class ApiService {
         Uri.parse('$baseUrl/admin/vendors/${Uri.encodeComponent(vendorName)}'),
         headers: {'Content-Type': 'application/json'},
       );
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = _parseResponse(response);
       return {
         'success': data['success'] ?? false,
         'message': data['message'] ?? '',
@@ -1199,7 +1235,7 @@ class ApiService {
         Uri.parse('$baseUrl/admin/vehicles'),
         headers: {'Content-Type': 'application/json'},
       );
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = _parseResponse(response);
       return {
         'success': data['success'] ?? false,
         'vehicles': data['vehicles'] != null
@@ -1226,7 +1262,7 @@ class ApiService {
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode(vehicleData),
       );
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = _parseResponse(response);
       return {
         'success': data['success'] ?? false,
         'message': data['message'] ?? '',
@@ -1254,7 +1290,7 @@ class ApiService {
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode(vehicleData),
       );
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = _parseResponse(response);
       return {
         'success': data['success'] ?? false,
         'message': data['message'] ?? '',
@@ -1278,7 +1314,7 @@ class ApiService {
         Uri.parse('$baseUrl/admin/vehicles/$vehicleId'),
         headers: {'Content-Type': 'application/json'},
       );
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = _parseResponse(response);
       return {
         'success': data['success'] ?? false,
         'message': data['message'] ?? '',
@@ -1303,7 +1339,7 @@ class ApiService {
         headers: {'Content-Type': 'application/json'},
       );
 
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = _parseResponse(response);
       return {
         'success': data['success'] ?? false,
         'notifications': data['notifications'] != null
@@ -1330,7 +1366,7 @@ class ApiService {
         headers: {'Content-Type': 'application/json'},
       );
 
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = _parseResponse(response);
       return {
         'success': data['success'] ?? false,
         'notifications': data['notifications'] != null
@@ -1357,7 +1393,7 @@ class ApiService {
         headers: {'Content-Type': 'application/json'},
       );
 
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = _parseResponse(response);
       return {
         'success': data['success'] ?? false,
         'message': data['message'] ?? '',
@@ -1382,7 +1418,7 @@ class ApiService {
         headers: {'Content-Type': 'application/json'},
       );
 
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = _parseResponse(response);
       return {
         'success': data['success'] ?? false,
         'count': data['count'] ?? 0,
