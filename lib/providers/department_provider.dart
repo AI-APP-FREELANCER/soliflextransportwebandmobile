@@ -23,10 +23,25 @@ class DepartmentProvider with ChangeNotifier {
         _departments = result['departments'] as List<String>;
         _error = null;
       } else {
-        _error = result['message'] ?? 'Failed to load departments';
+        // Provide user-friendly error messages
+        String errorMessage = result['message'] ?? 'Failed to load departments';
+        if (errorMessage.contains('502') || errorMessage.contains('Bad Gateway')) {
+          errorMessage = 'Backend server is not responding. Please check if the server is running.';
+        } else if (errorMessage.contains('Network error') || errorMessage.contains('Failed host lookup')) {
+          errorMessage = 'Cannot connect to server. Please check your internet connection.';
+        }
+        _error = errorMessage;
+        _departments = []; // Clear departments on error
       }
     } catch (e) {
-      _error = 'Error loading departments: ${e.toString()}';
+      String errorMessage = 'Error loading departments: ${e.toString()}';
+      if (errorMessage.contains('502') || errorMessage.contains('Bad Gateway')) {
+        errorMessage = 'Backend server is not responding. Please check if the server is running.';
+      } else if (errorMessage.contains('Network') || errorMessage.contains('Failed host lookup')) {
+        errorMessage = 'Cannot connect to server. Please check your internet connection.';
+      }
+      _error = errorMessage;
+      _departments = []; // Clear departments on error
     } finally {
       _isLoading = false;
       notifyListeners();

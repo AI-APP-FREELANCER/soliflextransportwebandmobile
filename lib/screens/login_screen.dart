@@ -125,6 +125,92 @@ class _LoginScreenState extends State<LoginScreen> {
                 // Department Dropdown
                 Consumer<DepartmentProvider>(
                   builder: (context, departmentProvider, child) {
+                    if (departmentProvider.isLoading) {
+                      return const Padding(
+                        padding: EdgeInsets.all(16.0),
+                        child: Center(child: CircularProgressIndicator()),
+                      );
+                    }
+
+                    if (departmentProvider.error != null) {
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.all(16.0),
+                            child: Container(
+                              padding: const EdgeInsets.all(12.0),
+                              decoration: BoxDecoration(
+                                color: AppTheme.errorRed.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(8.0),
+                                border: Border.all(color: AppTheme.errorRed),
+                              ),
+                              child: Column(
+                                children: [
+                                  Text(
+                                    'Failed to load departments',
+                                    style: TextStyle(
+                                      color: AppTheme.errorRed,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    departmentProvider.error ?? 'Network error',
+                                    style: TextStyle(
+                                      color: AppTheme.errorRed,
+                                      fontSize: 12,
+                                    ),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                  const SizedBox(height: 8),
+                                  ElevatedButton.icon(
+                                    onPressed: () {
+                                      Provider.of<DepartmentProvider>(context, listen: false).loadDepartments();
+                                    },
+                                    icon: const Icon(Icons.refresh, size: 18),
+                                    label: const Text('Retry'),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: AppTheme.primaryOrange,
+                                      foregroundColor: Colors.white,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      );
+                    }
+
+                    final departments = departmentProvider.departments;
+                    
+                    if (departments.isEmpty) {
+                      return Padding(
+                        padding: const EdgeInsets.all(16.0),
+                        child: Column(
+                          children: [
+                            const Text(
+                              'No departments available',
+                              style: TextStyle(color: AppTheme.errorRed),
+                            ),
+                            const SizedBox(height: 8),
+                            ElevatedButton.icon(
+                              onPressed: () {
+                                Provider.of<DepartmentProvider>(context, listen: false).loadDepartments();
+                              },
+                              icon: const Icon(Icons.refresh, size: 18),
+                              label: const Text('Retry'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: AppTheme.primaryOrange,
+                                foregroundColor: Colors.white,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }
+
                     return DropdownButtonFormField<String>(
                       value: _selectedDepartment,
                       decoration: const InputDecoration(
@@ -132,7 +218,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         hintText: 'Select your department',
                         prefixIcon: Icon(Icons.business),
                       ),
-                      items: departmentProvider.departments.map((dept) {
+                      items: departments.map((dept) {
                         return DropdownMenuItem(
                           value: dept,
                           child: Text(dept),
