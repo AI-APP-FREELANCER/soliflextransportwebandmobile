@@ -17,7 +17,7 @@ class ApiService {
     // Check for rate limiting (429)
     if (response.statusCode == 429) {
       try {
-        final data = _parseResponse(response);
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
         return {
           'success': false,
           'message': data['message'] ?? 'Too many requests. Please wait a moment and try again.',
@@ -33,7 +33,7 @@ class ApiService {
     // Check for other error status codes
     if (response.statusCode < 200 || response.statusCode >= 300) {
       try {
-        final data = _parseResponse(response);
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
         return {
           'success': false,
           'message': data['message'] ?? 'Request failed with status ${response.statusCode}',
@@ -48,7 +48,7 @@ class ApiService {
 
     // Success - parse JSON
     try {
-      final data = _parseResponse(response);
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
       return data;
     } catch (e) {
       return {
