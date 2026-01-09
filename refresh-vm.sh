@@ -1,7 +1,8 @@
 #!/bin/bash
 
 # Soliflex Packaging Transporter - Complete Refresh Script
-# This script pulls latest code and fully refreshes the application on VM
+# This script refreshes the application on VM
+# Note: Run 'git pull origin main' manually before running this script
 
 # Don't exit on error - we want to continue and show all issues
 set +e
@@ -35,13 +36,10 @@ BACKEND_DIR="$PROJECT_DIR/backend"
 
 print_status "Project directory: $PROJECT_DIR"
 
-# Step 1: Pull latest code from git
-print_status "Pulling latest code from git..."
-git fetch origin
-git pull origin main
-print_status "Code updated from git"
+# Note: Git pull should be done manually before running this script
+# git pull origin main
 
-# Step 2: Verify key files are updated
+# Step 1: Verify key files are updated
 print_status "Verifying updated files..."
 if grep -q "_parseResponse" "$PROJECT_DIR/lib/services/api_service.dart"; then
     print_status "✓ Rate limit error handling found in api_service.dart"
@@ -61,7 +59,7 @@ else
     print_warning "Backend port configuration may be incorrect"
 fi
 
-# Step 3: Check for port conflicts
+# Step 2: Check for port conflicts
 print_status "Checking for port conflicts..."
 if command -v lsof &> /dev/null; then
     PORT_5000_PID=$(sudo lsof -ti:5000 2>/dev/null)
@@ -89,7 +87,7 @@ elif command -v netstat &> /dev/null; then
     fi
 fi
 
-# Step 4: Stop and delete all PM2 processes
+# Step 3: Stop and delete all PM2 processes
 print_status "Stopping and deleting all PM2 processes..."
 pm2 stop all 2>/dev/null || print_warning "No processes to stop"
 sleep 2
@@ -97,7 +95,7 @@ pm2 delete all 2>/dev/null || print_warning "No processes to delete"
 pm2 flush 2>/dev/null || print_warning "Could not flush logs"
 print_status "All PM2 processes stopped and deleted"
 
-# Step 5: Clear all caches and build artifacts
+# Step 4: Clear all caches and build artifacts
 print_status "Clearing all caches and build artifacts..."
 cd "$PROJECT_DIR"
 
@@ -125,14 +123,14 @@ cd "$PROJECT_DIR"
 
 print_status "All caches cleared"
 
-# Step 6: Fix permissions (if needed)
+# Step 5: Fix permissions (if needed)
 print_status "Fixing file permissions..."
 cd "$PROJECT_DIR"
 # Fix ownership if needed (uncomment if permission issues occur)
 # sudo chown -R $USER:$USER . 2>/dev/null || true
 print_status "Permissions checked"
 
-# Step 7: Install backend dependencies
+# Step 6: Install backend dependencies
 print_status "Installing/updating backend dependencies..."
 cd "$BACKEND_DIR"
 if npm install --production; then
@@ -145,13 +143,13 @@ fi
 cd "$PROJECT_DIR"
 print_status "Backend dependencies updated"
 
-# Step 8: Get Flutter dependencies (clean state)
+# Step 7: Get Flutter dependencies (clean state)
 print_status "Getting Flutter dependencies (clean state)..."
 flutter clean
 flutter pub get
 print_status "Flutter dependencies updated"
 
-# Step 9: Build Flutter web frontend (fresh build)
+# Step 8: Build Flutter web frontend (fresh build)
 print_status "Building Flutter web frontend (release mode)..."
 if flutter build web --release --no-tree-shake-icons; then
     print_status "✓ Flutter build completed successfully"
@@ -199,11 +197,11 @@ else
     print_error "✗ main.dart.js not found - build may have failed"
 fi
 
-# Step 10: Create logs directory
+# Step 9: Create logs directory
 print_status "Creating logs directory..."
 mkdir -p logs
 
-# Step 11: Verify backend server.js exists and is executable
+# Step 10: Verify backend server.js exists and is executable
 print_status "Verifying backend files..."
 if [ ! -f "$BACKEND_DIR/server.js" ]; then
     print_error "Backend server.js not found at $BACKEND_DIR/server.js"
@@ -222,7 +220,7 @@ if ! command -v pm2 &> /dev/null; then
     exit 1
 fi
 
-# Step 12: Start applications with PM2 (fresh start)
+# Step 11: Start applications with PM2 (fresh start)
 print_status "Starting applications with PM2..."
 cd "$PROJECT_DIR"
 
@@ -243,11 +241,11 @@ else
     exit 1
 fi
 
-# Step 13: Save PM2 configuration
+# Step 12: Save PM2 configuration
 print_status "Saving PM2 configuration..."
 pm2 save
 
-# Step 14: Wait for services to start and verify
+# Step 13: Wait for services to start and verify
 print_status "Waiting for services to start..."
 sleep 8
 
@@ -272,7 +270,7 @@ else
     pm2 logs soliflex-frontend --lines 20 --nostream
 fi
 
-# Step 15: Display status and verify
+# Step 14: Display status and verify
 print_status "PM2 Process Status:"
 pm2 list
 
