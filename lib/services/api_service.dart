@@ -77,15 +77,16 @@ class ApiService {
         // Subdomain or domain - use /api path (Nginx will proxy to backend)
         return '$baseProtocol://$hostname/api';
       } else {
-        // IP address or localhost - use :3000 port directly
-        return '$baseProtocol://$hostname:3000/api';
+        // IP address or localhost - use backend port directly
+        // Keep this in sync with your backend PORT (default 5000).
+        return '$baseProtocol://$hostname:5000/api';
       }
     } else {
       // For mobile/emulator, use localhost or configured IP
-      // - Android Emulator: http://10.0.2.2:3000/api
-      // - iOS Simulator: http://localhost:3000/api
-      // - Physical Device: Use your computer's IP address, e.g., http://192.168.1.100:3000/api
-      return 'http://localhost:3000/api';
+      // - Android Emulator: http://10.0.2.2:5000/api
+      // - iOS Simulator: http://localhost:5000/api
+      // - Physical Device: Use your computer's IP address, e.g., http://192.168.1.100:5000/api
+      return 'http://localhost:5000/api';
     }
   }
 
@@ -721,6 +722,48 @@ class ApiService {
         return {
           'success': false,
           'message': data['message'] ?? 'Failed to assign vehicle',
+          'order': null,
+        };
+      }
+      return {
+        'success': data['success'] ?? false,
+        'message': data['message'] ?? '',
+        'order': data['order'] != null
+            ? OrderModel.fromJson(data['order'] as Map<String, dynamic>)
+            : null,
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'message': 'Network error: ${e.toString()}',
+        'order': null,
+      };
+    }
+  }
+
+  /// Admin/Accounts only — order must be Open on server.
+  Future<Map<String, dynamic>> updateOrderSegmentPricing({
+    required String orderId,
+    required String userId,
+    required List<Map<String, dynamic>> segments,
+  }) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/admin/update-order-segment-pricing'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'orderId': orderId,
+          'userId': userId,
+          'segments': segments,
+        }),
+      );
+
+      final data = _parseResponse(response);
+
+      if (data['success'] != true) {
+        return {
+          'success': false,
+          'message': data['message'] ?? 'Failed to update segment pricing',
           'order': null,
         };
       }

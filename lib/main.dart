@@ -9,13 +9,12 @@ import 'providers/order_provider.dart';
 import 'providers/notification_provider.dart';
 import 'screens/login_screen.dart';
 import 'screens/register_screen.dart';
-import 'screens/home_screen.dart';
 import 'screens/rfq_create_screen.dart';
 import 'screens/my_rfqs_screen.dart';
 import 'screens/approval_dashboard_screen.dart';
 import 'screens/orders_dashboard_screen.dart';
 import 'screens/notifications_screen.dart';
-import 'screens/home_screen.dart' show homeRouteObserver;
+import 'screens/home_screen.dart' show HomeScreen, homeRouteObserver;
 
 void main() {
   runApp(const SoliflexApp());
@@ -39,8 +38,10 @@ class SoliflexApp extends StatelessWidget {
         builder: (context, authProvider, child) {
           // Determine initial route based on auth state
           final initialRoute = authProvider.isAuthenticated ? '/home' : '/login';
-          
+
           return MaterialApp(
+            // Recreate navigator when auth restores from prefs (otherwise web can show a blank shell).
+            key: ValueKey<String>(initialRoute),
             title: 'Soliflex Packaging',
             debugShowCheckedModeBanner: false,
             theme: AppTheme.lightTheme,

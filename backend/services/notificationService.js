@@ -1,4 +1,4 @@
-const csvService = require('./csvDatabaseService');
+const csvService = require('./dataService');
 
 /**
  * Determine recipients for a new order

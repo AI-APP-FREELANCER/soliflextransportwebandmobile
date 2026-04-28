@@ -2,9 +2,14 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/order_model.dart';
+import '../models/vehicle_model.dart';
+import '../providers/auth_provider.dart';
 import '../providers/vendor_provider.dart';
 import '../services/api_service.dart';
+import '../services/order_workflow_service.dart';
 import '../theme/app_theme.dart';
+import '../utils/order_edit_eligibility.dart';
+import '../widgets/order_vehicle_pricing_dialogs.dart';
 
 class AmendmentModal extends StatefulWidget {
   final OrderModel order;
@@ -25,6 +30,8 @@ class _AmendmentModalState extends State<AmendmentModal> {
   final _formKey = GlobalKey<FormState>();
   final List<String> _materialTypeOptions = ['Raw Materials', 'Rolls', 'Wastage', 'Other'];
   final ApiService _apiService = ApiService();
+  final OrderWorkflowService _workflowService = OrderWorkflowService();
+  late OrderModel _liveOrder;
   // Preview invoice for final return segment (Round Trip only)
   int? _finalReturnSegmentInvoice;
   int? _finalReturnSegmentToll;
@@ -109,7 +116,44 @@ class _AmendmentModalState extends State<AmendmentModal> {
                   ),
                   Divider(color: AppTheme.darkBorder),
                   const SizedBox(height: 16),
-                  
+                  Builder(
+                    builder: (context) {
+                      final user = Provider.of<AuthProvider>(context, listen: false).user;
+                      final showVehicle = OrderEditEligibility.canChangeVehicle(
+                        _liveOrder,
+                        _workflowService,
+                        user,
+                      );
+                      final showPricing = OrderEditEligibility.canEditSegmentPricing(
+                        _liveOrder,
+                        _workflowService,
+                        user,
+                      );
+                      if (!showVehicle && !showPricing) {
+                        return const SizedBox.shrink();
+                      }
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          if (showVehicle)
+                            OutlinedButton.icon(
+                              onPressed: _showAmendmentVehicleDialog,
+                              icon: const Icon(Icons.edit_road, size: 18),
+                              label: const Text('Change vehicle'),
+                            ),
+                          if (showVehicle && showPricing) const SizedBox(height: 8),
+                          if (showPricing)
+                            OutlinedButton.icon(
+                              onPressed: _showAmendmentPricingDialog,
+                              icon: const Icon(Icons.currency_rupee, size: 18),
+                              label: const Text('Edit segment pricing (Admin)'),
+                            ),
+                          const SizedBox(height: 16),
+                        ],
+                      );
+                    },
+                  ),
+
                   // Existing Segments (Read-only)
                   const Text(
                     'Existing Trip Segments',
@@ -126,12 +170,12 @@ class _AmendmentModalState extends State<AmendmentModal> {
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Column(
-                      children: widget.order.tripSegments.map((segment) {
+                      children: _liveOrder.tripSegments.map((segment) {
                         return Container(
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
                             color: Colors.grey.shade50,
-                            border: segment != widget.order.tripSegments.last
+                            border: segment != _liveOrder.tripSegments.last
                                 ? Border(bottom: BorderSide(color: Colors.grey.shade200))
                                 : null,
                           ),
@@ -182,7 +226,7 @@ class _AmendmentModalState extends State<AmendmentModal> {
                   if (_isRoundTrip()) ...[
                     const SizedBox(height: 4),
                     Text(
-                      'Add a single stop to the route: ${widget.order.tripSegments.isNotEmpty ? widget.order.tripSegments[0].destination : "B"} → C',
+                      'Add a single stop to the route: ${_liveOrder.tripSegments.isNotEmpty ? _liveOrder.tripSegments[0].destination : "B"} → C',
                       style: TextStyle(
                         fontSize: 12,
                         color: Colors.grey.shade600,
@@ -208,10 +252,10 @@ class _AmendmentModalState extends State<AmendmentModal> {
                       onPressed: () {
                         setState(() {
                           // Get last segment's destination as default source for new segment
-                          final lastDest = _newSegments.isNotEmpty 
-                              ? _newSegments.last['destination'] 
-                              : (widget.order.tripSegments.isNotEmpty
-                                  ? widget.order.tripSegments.last.destination
+                          final lastDest = _newSegments.isNotEmpty
+                              ? _newSegments.last['destination']
+                              : (_liveOrder.tripSegments.isNotEmpty
+                                  ? _liveOrder.tripSegments.last.destination
                                   : '');
                           _newSegments.add({
                             'source': lastDest,
@@ -275,10 +319,85 @@ class _AmendmentModalState extends State<AmendmentModal> {
     );
   }
 
+  Future<void> _reloadLiveOrder() async {
+    final result = await _apiService.getOrderById(widget.order.orderId);
+    if (!mounted) return;
+    if (result['success'] == true && result['order'] != null) {
+      setState(() {
+        _liveOrder = result['order'] as OrderModel;
+      });
+    }
+  }
+
+  Future<void> _showAmendmentVehicleDialog() async {
+    final totalWeight = _liveOrder.getTotalWeight();
+    final selectedVehicle = await showDialog<VehicleModel?>(
+      context: context,
+      builder: (dialogContext) => OrderVehicleSelectionDialog(
+        order: _liveOrder,
+        totalWeight: totalWeight,
+        apiService: _apiService,
+      ),
+    );
+    if (selectedVehicle == null || !mounted) return;
+    final userId = Provider.of<AuthProvider>(context, listen: false).user?.userId;
+    try {
+      final assignResult = await _apiService.assignVehicleToOrder(
+        orderId: _liveOrder.orderId,
+        vehicleId: selectedVehicle.vehicleId,
+        vehicleNumber: selectedVehicle.vehicleNumber,
+        vehicleType: selectedVehicle.vehicleType.isNotEmpty
+            ? selectedVehicle.vehicleType
+            : selectedVehicle.type,
+        capacityKg: selectedVehicle.capacityKg,
+        userId: userId,
+      );
+      if (!mounted) return;
+      if (assignResult['success'] == true) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Vehicle updated'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        await _reloadLiveOrder();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(assignResult['message'] ?? 'Failed to update vehicle'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  void _showAmendmentPricingDialog() {
+    final user = Provider.of<AuthProvider>(context, listen: false).user;
+    if (user == null) return;
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => OrderAdminSegmentPricingDialog(
+        order: _liveOrder,
+        userId: user.userId,
+        onSaved: () {
+          Navigator.of(dialogContext).pop();
+          _reloadLiveOrder();
+        },
+      ),
+    );
+  }
+
   // Check if order is Round Trip
   bool _isRoundTrip() {
-    return widget.order.tripType == 'Round-Trip-Vendor' || 
-           widget.order.originalTripType == 'Round-Trip-Vendor';
+    return _liveOrder.tripType == 'Round-Trip-Vendor' ||
+        _liveOrder.originalTripType == 'Round-Trip-Vendor';
   }
   
   // Calculate preview invoice for final return segment (C → A)
@@ -287,9 +406,9 @@ class _AmendmentModalState extends State<AmendmentModal> {
     
     final lastNewSegment = _newSegments.last;
     final lastDestination = lastNewSegment['destination']?.toString() ?? '';
-    final orderSource = widget.order.tripSegments.isNotEmpty
-        ? widget.order.tripSegments[0].source
-        : widget.order.source;
+    final orderSource = _liveOrder.tripSegments.isNotEmpty
+        ? _liveOrder.tripSegments[0].source
+        : _liveOrder.source;
     
     // Only calculate if last destination is a vendor (not the original source)
     if (lastDestination.isNotEmpty && 
@@ -304,6 +423,7 @@ class _AmendmentModalState extends State<AmendmentModal> {
         final result = await _apiService.calculateInvoiceRate(
           sourceLocation: lastDestination, // Vendor location (source for return segment)
           materialWeight: weightFromModal, // Weight from amendment modal
+          tripType: _liveOrder.originalTripType,
         );
         
         if (mounted) {
@@ -345,7 +465,7 @@ class _AmendmentModalState extends State<AmendmentModal> {
           Text(
             _isRoundTrip() 
                 ? 'Additional Route (B → C)'
-                : 'New Segment #${widget.order.tripSegments.length + index + 1}',
+                : 'New Segment #${_liveOrder.tripSegments.length + index + 1}',
             style: const TextStyle(
               fontWeight: FontWeight.bold,
               fontSize: 14,
@@ -737,6 +857,7 @@ class _AmendmentModalState extends State<AmendmentModal> {
                 _apiService.calculateInvoiceRate(
                   sourceLocation: source,
                   materialWeight: weight,
+                  tripType: _liveOrder.originalTripType,
                 ).then((result) {
                   if (mounted) {
                     setState(() {
@@ -836,9 +957,9 @@ class _AmendmentModalState extends State<AmendmentModal> {
               builder: (context) {
                 final lastNewSegment = _newSegments.last;
                 final lastDestination = lastNewSegment['destination']?.toString() ?? '';
-                final orderSource = widget.order.tripSegments.isNotEmpty
-                    ? widget.order.tripSegments[0].source
-                    : widget.order.source;
+                final orderSource = _liveOrder.tripSegments.isNotEmpty
+                    ? _liveOrder.tripSegments[0].source
+                    : _liveOrder.source;
                 
                 if (lastDestination.isNotEmpty && lastDestination != orderSource) {
                   return Container(

@@ -55,3 +55,14 @@ notification_id,order_id,recipient_department,notification_type,message,status,c
 54,Order-1046,Security-Factory 2,ORDER_APPROVED,"Vehicle entry/exit notification for Bhagyashree, IAF unit-2. Order ID: Order-1046",unread,2025-12-24T09:16:57.383+05:30,11
 55,Order-1046,Stores Unit-IV/ soliflex unit-II,ORDER_APPROVED,"Material verification required for Bhagyashree, IAF unit-2. Order ID: Order-1046",unread,2025-12-24T09:16:57.390+05:30,11
 56,Order-1047,Accounts Team,ORDER_CREATED,"New order created, pending for approval. Order ID: Order-1047",unread,2025-12-24T09:18:24.547+05:30,11
+57,Order-1048,Accounts Team,ORDER_CREATED,"New order created, pending for approval. Order ID: Order-1048",unread,2026-04-17T14:13:59.503+05:30,11
+58,Order-1048,Security-Factory 1,ORDER_APPROVED,"Vehicle entry/exit notification for Bulk Liquid Solution, Soliflex unit-1. Order ID: Order-1048",unread,2026-04-17T14:14:49.890+05:30,11
+59,Order-1048,Stores IAF Unit-1/ Soliflex unit-1,ORDER_APPROVED,"Material verification required for Bulk Liquid Solution, Soliflex unit-1. Order ID: Order-1048",unread,2026-04-17T14:14:49.898+05:30,11
+60,Order-1048,Fabric IAF unit-1 / Soliflex unit-1,ORDER_APPROVED,"Material verification required for Bulk Liquid Solution, Soliflex unit-1. Order ID: Order-1048",unread,2026-04-17T14:14:49.906+05:30,11
+61,Order-1049,Accounts Team,ORDER_CREATED,"New order created, pending for approval. Order ID: Order-1049",unread,2026-04-17T16:25:31.124+05:30,11
+62,Order-1049,Security-Factory 2,ORDER_APPROVED,"Vehicle entry/exit notification for Bulk Liquid Solution, IAF unit-2. Order ID: Order-1049",unread,2026-04-17T16:31:08.764+05:30,11
+63,Order-1049,Stores Unit-IV/ soliflex unit-II,ORDER_APPROVED,"Material verification required for Bulk Liquid Solution, IAF unit-2. Order ID: Order-1049",unread,2026-04-17T16:31:08.779+05:30,11
+64,Order-1050,Accounts Team,ORDER_CREATED,"New order created, pending for approval. Order ID: Order-1050",unread,2026-04-17T16:52:21.607+05:30,11
+65,Order-1050,Security-Factory 3,ORDER_APPROVED,"Vehicle entry/exit notification for Buildmet Fibres Pvt ltd (Dabaspet), Soliflex unit-3. Order ID: Order-1050",unread,2026-04-17T16:52:46.989+05:30,11
+66,Order-1050,Soliflex Unit-III,ORDER_APPROVED,Order approved and requires your attention. Order ID: Order-1050,unread,2026-04-17T16:52:47.004+05:30,11
+67,Order-1050,Fabric Solifelx unit-III,ORDER_APPROVED,"Material verification required for Buildmet Fibres Pvt ltd (Dabaspet), Soliflex unit-3. Order ID: Order-1050",unread,2026-04-17T16:52:47.019+05:30,11

@@ -204,5 +204,44 @@ class OrderProvider with ChangeNotifier {
       notifyListeners();
     }
   }
+
+  /// Admin/Accounts: edit segment invoice/toll while order is Open.
+  Future<Map<String, dynamic>> updateOrderSegmentPricing({
+    required String orderId,
+    required String userId,
+    required List<Map<String, dynamic>> segments,
+  }) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      final result = await _apiService.updateOrderSegmentPricing(
+        orderId: orderId,
+        userId: userId,
+        segments: segments,
+      );
+
+      if (result['success'] == true) {
+        await loadOrders();
+        return {
+          'success': true,
+          'message': result['message'] ?? 'Pricing updated',
+          'order': result['order'],
+        };
+      }
+      _error = result['message'] ?? 'Failed to update pricing';
+      return {
+        'success': false,
+        'message': _error ?? 'Failed to update pricing',
+      };
+    } catch (e) {
+      _error = 'Error updating pricing: ${e.toString()}';
+      return {'success': false, 'message': _error};
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
 }
 

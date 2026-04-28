@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 class AppTheme {
@@ -21,9 +22,14 @@ class AppTheme {
   }
 
   static ThemeData get darkTheme {
+    // Web: avoid loading Roboto from fonts.gstatic.com (often blocked / offline → blank or broken UI).
+    const webSafeFont =
+        'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif';
+
     return ThemeData(
       useMaterial3: true,
       brightness: Brightness.dark,
+      fontFamily: kIsWeb ? webSafeFont : null,
       colorScheme: ColorScheme.dark(
         primary: primaryOrange,
         secondary: primaryOrange,

@@ -6,6 +6,7 @@ import '../models/order_model.dart';
 import '../models/vehicle_model.dart';
 import '../services/api_service.dart';
 import '../theme/app_theme.dart';
+import '../utils/order_edit_eligibility.dart';
 import '../utils/permission_utils.dart';
 import '../widgets/notification_badge.dart';
 import 'admin_dashboard_screen.dart';
@@ -400,7 +401,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
                                 final filteredOrders = _getFilteredOrders(allOrders);
                                 final metrics = _calculateMetrics(filteredOrders);
                                 final statusMetrics = _calculateStatusMetrics(filteredOrders);
-                                
+                                final user = Provider.of<AuthProvider>(context, listen: false).user;
+                                final showFinancials = OrderEditEligibility.canViewOrderFinancials(user);
+
                                 return Column(
                                   crossAxisAlignment: CrossAxisAlignment.center,
                                   children: [
@@ -503,12 +506,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
                                     const SizedBox(height: 16),
                                     // Trip Type Analysis
                                     _buildTripTypeCard(context, metrics),
-                                    const SizedBox(height: 12),
-                                    // Revenue Analysis
-                                    _buildRevenueCard(context, metrics),
+                                    if (showFinancials) ...[
+                                      const SizedBox(height: 12),
+                                      _buildRevenueCard(context, metrics),
+                                    ],
                                     const SizedBox(height: 16),
                                     // Operational Analysis Section
-                                    _buildOperationalAnalysisSection(context, filteredOrders),
+                                    _buildOperationalAnalysisSection(
+                                      context,
+                                      filteredOrders,
+                                      showFinancialBreakdown: showFinancials,
+                                    ),
                                   ],
                                 );
                               },
@@ -910,7 +918,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
   // OPERATIONAL ANALYSIS SECTION
   // ====================================================================
 
-  Widget _buildOperationalAnalysisSection(BuildContext context, List<OrderModel> filteredOrders) {
+  Widget _buildOperationalAnalysisSection(
+    BuildContext context,
+    List<OrderModel> filteredOrders, {
+    required bool showFinancialBreakdown,
+  }) {
     return Card(
       elevation: 1,
       shape: RoundedRectangleBorder(
@@ -936,9 +948,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
             const SizedBox(height: 16),
             // Utilization Analysis Table
             _buildUtilizationAnalysisTable(context, filteredOrders),
-            const SizedBox(height: 16),
-            // Financial Breakdown Table
-            _buildFinancialBreakdownTable(context, filteredOrders),
+            if (showFinancialBreakdown) ...[
+              const SizedBox(height: 16),
+              _buildFinancialBreakdownTable(context, filteredOrders),
+            ],
             const SizedBox(height: 16),
             // Operational Insights
             _buildOperationalInsights(context, filteredOrders),

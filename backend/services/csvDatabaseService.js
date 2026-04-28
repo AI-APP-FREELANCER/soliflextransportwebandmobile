@@ -745,6 +745,44 @@ function getWeightBracket(materialWeight) {
   }
 }
 
+/** Pick-up rate columns (Soliflex) for one weight tier. */
+function invoiceAmountFromPickColumns(vendor, weightBracket) {
+  let n = 0;
+  switch (weightBracket) {
+    case 'below_3000':
+      n = parseInt(vendor?.pick_up_by_sol_below_3000_kgs || '0', 10);
+      break;
+    case '3000_5999':
+      n = parseInt(vendor?.pick_up_by_sol_between_3000_to_5999_kgs || '0', 10);
+      break;
+    case 'above_6000':
+      n = parseInt(vendor?.pick_up_by_sol_above_6000_kgs || '0', 10);
+      break;
+    default:
+      n = 0;
+  }
+  return Number.isNaN(n) ? 0 : n;
+}
+
+/** Drop rate columns (vendor) for one weight tier. */
+function invoiceAmountFromDropColumns(vendor, weightBracket) {
+  let n = 0;
+  switch (weightBracket) {
+    case 'below_3000':
+      n = parseInt(vendor?.dropped_by_vendor_below_3000_kgs || '0', 10);
+      break;
+    case '3000_5999':
+      n = parseInt(vendor?.dropped_by_vendor_below_5999_kgs || '0', 10);
+      break;
+    case 'above_6000':
+      n = parseInt(vendor?.dropped_by_vendor_above_6000_kgs || '0', 10);
+      break;
+    default:
+      n = 0;
+  }
+  return Number.isNaN(n) ? 0 : n;
+}
+
 // Calculate invoice rate based on source location and material weight
 // For Multiple Trip: Use calculateInvoiceRateForSegment() which checks both source and destination
 async function calculateInvoiceRate(sourceLocation, materialWeight, destinationLocation = null, tripType = null) {
@@ -808,45 +846,22 @@ async function calculateInvoiceRate(sourceLocation, materialWeight, destinationL
     // Get weight bracket
     const weightBracket = getWeightBracket(materialWeight);
 
-    // Select appropriate column based on source type and weight bracket
-    // Part 1: Verify data type coercion - all values must be parsed as integers
+    const normalizedTripType = (tripType && String(tripType).trim()) || '';
+
     let invoiceAmount = 0;
     let tollCharges = 0;
 
-    if (isFactory) {
-      // Factory locations (Soliflex picks up)
-      // Part 1: Ensure proper type coercion - parse as integer with radix
-      switch (weightBracket) {
-        case 'below_3000':
-          invoiceAmount = parseInt(vendor?.pick_up_by_sol_below_3000_kgs || '0', 10);
-          if (isNaN(invoiceAmount)) invoiceAmount = 0;
-          break;
-        case '3000_5999':
-          invoiceAmount = parseInt(vendor?.pick_up_by_sol_between_3000_to_5999_kgs || '0', 10);
-          if (isNaN(invoiceAmount)) invoiceAmount = 0;
-          break;
-        case 'above_6000':
-          invoiceAmount = parseInt(vendor?.pick_up_by_sol_above_6000_kgs || '0', 10);
-          if (isNaN(invoiceAmount)) invoiceAmount = 0;
-          break;
-      }
+    // Source-only: Single-Trip = pick columns only; Round-Trip = pick + drop; else legacy factory/vendor split
+    if (normalizedTripType === 'Round-Trip-Vendor') {
+      invoiceAmount =
+        invoiceAmountFromPickColumns(vendor, weightBracket) +
+        invoiceAmountFromDropColumns(vendor, weightBracket);
+    } else if (normalizedTripType === 'Single-Trip-Vendor') {
+      invoiceAmount = invoiceAmountFromPickColumns(vendor, weightBracket);
     } else {
-      // Vendor locations (vendor drops)
-      // Part 1: Ensure proper type coercion - parse as integer with radix
-      switch (weightBracket) {
-        case 'below_3000':
-          invoiceAmount = parseInt(vendor?.dropped_by_vendor_below_3000_kgs || '0', 10);
-          if (isNaN(invoiceAmount)) invoiceAmount = 0;
-          break;
-        case '3000_5999':
-          invoiceAmount = parseInt(vendor?.dropped_by_vendor_below_5999_kgs || '0', 10);
-          if (isNaN(invoiceAmount)) invoiceAmount = 0;
-          break;
-        case 'above_6000':
-          invoiceAmount = parseInt(vendor?.dropped_by_vendor_above_6000_kgs || '0', 10);
-          if (isNaN(invoiceAmount)) invoiceAmount = 0;
-          break;
-      }
+      invoiceAmount = isFactory
+        ? invoiceAmountFromPickColumns(vendor, weightBracket)
+        : invoiceAmountFromDropColumns(vendor, weightBracket);
     }
 
     // Get toll charges (only for vendors, factories typically don't have toll charges)
@@ -856,11 +871,19 @@ async function calculateInvoiceRate(sourceLocation, materialWeight, destinationL
       if (isNaN(tollCharges)) tollCharges = 0;
     }
 
-    // Part 1: Log calculation details for debugging
+    const modeLabel =
+      normalizedTripType === 'Round-Trip-Vendor'
+        ? 'RoundTrip pick+drop'
+        : normalizedTripType === 'Single-Trip-Vendor'
+          ? 'SingleTrip pick only'
+          : isFactory
+            ? 'legacy factory pick'
+            : 'legacy vendor drop';
     console.log(`[Rate Calculation] Source-only: ${sourceLocation}`);
-    console.log(`  Source Type: ${isFactory ? 'Factory (Pick)' : 'Vendor (Drop)'}`);
+    console.log(`  Trip type: ${normalizedTripType || '(none)'} (${modeLabel})`);
+    console.log(`  Source is factory: ${isFactory}`);
     console.log(`  Weight: ${materialWeight} kg (Bracket: ${weightBracket})`);
-    console.log(`  Vendor: ${vendor?.vendor_name || 'N/A'}`);
+    console.log(`  Vendor row: ${vendor?.vendor_name || 'N/A'}`);
     console.log(`  Invoice Amount: ₹${invoiceAmount}`);
     console.log(`  Toll Charges: ₹${tollCharges}`);
 

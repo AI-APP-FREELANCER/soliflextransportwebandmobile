@@ -8,6 +8,8 @@ import '../providers/auth_provider.dart';
 import '../services/order_workflow_service.dart';
 import '../services/api_service.dart';
 import '../theme/app_theme.dart';
+import '../utils/order_edit_eligibility.dart';
+import '../widgets/order_vehicle_pricing_dialogs.dart';
 import '../widgets/workflow_stage_card.dart';
 
 class WorkflowScreen extends StatefulWidget {
@@ -258,6 +260,94 @@ class _WorkflowScreenState extends State<WorkflowScreen> {
     }
   }
 
+  Future<void> _showWorkflowVehicleChangeDialog() async {
+    if (_order == null) return;
+    final totalWeight = _order!.getTotalWeight();
+    final selectedVehicle = await showDialog<VehicleModel?>(
+      context: context,
+      builder: (dialogContext) => OrderVehicleSelectionDialog(
+        order: _order!,
+        totalWeight: totalWeight,
+        apiService: _apiService,
+      ),
+    );
+
+    if (selectedVehicle == null || !mounted) return;
+
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final userId = authProvider.user?.userId;
+
+    try {
+      final assignResult = await _apiService.assignVehicleToOrder(
+        orderId: _order!.orderId,
+        vehicleId: selectedVehicle.vehicleId,
+        vehicleNumber: selectedVehicle.vehicleNumber,
+        vehicleType: selectedVehicle.vehicleType.isNotEmpty ? selectedVehicle.vehicleType : selectedVehicle.type,
+        capacityKg: selectedVehicle.capacityKg,
+        userId: userId,
+      );
+
+      if (!mounted) return;
+
+      if (assignResult['success'] == true) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Vehicle updated successfully'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 3),
+          ),
+        );
+        setState(() {
+          _lastOrderStatus = null;
+          _lastWorkflowHash = null;
+        });
+        await _loadOrder();
+        await _loadVehicles();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(assignResult['message'] ?? 'Failed to update vehicle'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  void _showWorkflowSegmentPricingDialog() {
+    if (_order == null) return;
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final user = authProvider.user;
+    if (user == null) return;
+
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => OrderAdminSegmentPricingDialog(
+        order: _order!,
+        userId: user.userId,
+        onSaved: () {
+          Navigator.of(dialogContext).pop();
+          if (!mounted) return;
+          setState(() {
+            _lastOrderStatus = null;
+            _lastWorkflowHash = null;
+          });
+          _loadOrder();
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
@@ -392,6 +482,36 @@ class _WorkflowScreenState extends State<WorkflowScreen> {
                                   color: AppTheme.primaryOrange,
                                 ),
                               ),
+                            if (OrderEditEligibility.canChangeVehicle(
+                                  _order!,
+                                  _workflowService,
+                                  user,
+                                )) ...[
+                              const SizedBox(height: 12),
+                              SizedBox(
+                                width: double.infinity,
+                                child: OutlinedButton.icon(
+                                  onPressed: _isProcessing ? null : _showWorkflowVehicleChangeDialog,
+                                  icon: const Icon(Icons.edit_road, size: 18),
+                                  label: const Text('Change vehicle'),
+                                ),
+                              ),
+                            ],
+                            if (OrderEditEligibility.canEditSegmentPricing(
+                                  _order!,
+                                  _workflowService,
+                                  user,
+                                )) ...[
+                              const SizedBox(height: 8),
+                              SizedBox(
+                                width: double.infinity,
+                                child: OutlinedButton.icon(
+                                  onPressed: _isProcessing ? null : _showWorkflowSegmentPricingDialog,
+                                  icon: const Icon(Icons.currency_rupee, size: 18),
+                                  label: const Text('Edit segment pricing (Admin)'),
+                                ),
+                              ),
+                            ],
                           ],
                         ),
                       ),

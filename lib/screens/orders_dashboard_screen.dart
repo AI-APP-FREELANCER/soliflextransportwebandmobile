@@ -11,7 +11,9 @@ import '../services/api_service.dart';
 import '../services/order_workflow_service.dart';
 import '../utils/permission_utils.dart';
 import '../theme/app_theme.dart';
+import '../utils/order_edit_eligibility.dart';
 import '../widgets/notification_badge.dart';
+import '../widgets/order_vehicle_pricing_dialogs.dart';
 import 'amendment_modal.dart';
 import 'approval_summary_modal.dart';
 import 'workflow_screen.dart';
@@ -28,6 +30,8 @@ class _OrdersDashboardScreenState extends State<OrdersDashboardScreen> {
   final ApiService _apiService = ApiService();
   final OrderWorkflowService _workflowService = OrderWorkflowService();
   List<VehicleModel> _vehicles = [];
+  /// Per tab: when false, only show orders whose tab-specific anchor date falls in this week (Mon–Sun local).
+  final Map<String, bool> _showOlderOrders = {};
 
   @override
   void initState() {
@@ -147,6 +151,102 @@ class _OrdersDashboardScreenState extends State<OrdersDashboardScreen> {
       return 'Cancelled';
     }
     return order.orderStatus;
+  }
+
+  DateTime _mondayStartLocal(DateTime d) {
+    final day = DateTime(d.year, d.month, d.day);
+    final fromMonday = d.weekday - DateTime.monday;
+    return day.subtract(Duration(days: fromMonday));
+  }
+
+  DateTime _sundayEndLocal(DateTime d) {
+    final monday = _mondayStartLocal(d);
+    final sunday = monday.add(const Duration(days: 6));
+    return DateTime(sunday.year, sunday.month, sunday.day, 23, 59, 59, 999);
+  }
+
+  /// Latest workflow step rejection time (ms epoch), if any.
+  DateTime? _latestRejectedWorkflowInstant(OrderModel o) {
+    int maxTs = 0;
+    for (final seg in o.tripSegments) {
+      for (final step in seg.workflow) {
+        final u = step.status.toUpperCase();
+        if (u == 'REJECTED' || u == 'CANCELLED' || u == 'CANCELED') {
+          if (step.timestamp > maxTs) maxTs = step.timestamp;
+        }
+      }
+    }
+    if (maxTs <= 0) return null;
+    return DateTime.fromMillisecondsSinceEpoch(maxTs);
+  }
+
+  /// Date used for “this week” on the dashboard for a given tab (not necessarily `createdAt`).
+  DateTime? _weekAnchorForFilter(OrderModel o, String filter) {
+    switch (filter) {
+      case 'Open':
+        // Re-open after amendment uses last_amended_timestamp; first time Open uses created_at.
+        return o.lastAmendedTimestamp ?? o.createdAt;
+      case 'In-Progress':
+        // Set when moving from Open to In-Progress (or En-Route) on the server.
+        return o.approvedTimestamp ?? o.createdAt;
+      case 'En-Route':
+        return o.vehicleStartedAtTimestamp ??
+            o.approvedTimestamp ??
+            o.createdAt;
+      case 'Completed':
+        return o.exitApprovedByTimestamp ??
+            o.vehicleExitedTimestamp ??
+            o.approvedTimestamp ??
+            o.createdAt;
+      case 'Cancelled':
+        return _latestRejectedWorkflowInstant(o) ?? o.createdAt;
+      case 'All':
+      default:
+        return o.createdAt;
+    }
+  }
+
+  bool _anchorInThisWeekForSelectedFilter(OrderModel o) {
+    final anchor = _weekAnchorForFilter(o, _selectedFilter);
+    if (anchor == null) return false;
+    final now = DateTime.now();
+    final ws = _mondayStartLocal(now);
+    final we = _sundayEndLocal(now);
+    return !anchor.isBefore(ws) && !anchor.isAfter(we);
+  }
+
+  int _orderIdNumeric(String orderId) {
+    final m = RegExp(r'Order-(\d+)', caseSensitive: false).firstMatch(orderId);
+    if (m == null) return 0;
+    return int.tryParse(m.group(1) ?? '0') ?? 0;
+  }
+
+  int _compareOrdersNewestFirst(OrderModel a, OrderModel b) {
+    final da = _weekAnchorForFilter(a, _selectedFilter);
+    final db = _weekAnchorForFilter(b, _selectedFilter);
+    if (da != null && db != null) {
+      final cmp = db.compareTo(da);
+      if (cmp != 0) return cmp;
+    } else if (da != null) {
+      return -1;
+    } else if (db != null) {
+      return 1;
+    }
+    return _orderIdNumeric(b.orderId).compareTo(_orderIdNumeric(a.orderId));
+  }
+
+  List<OrderModel> _visibleOrdersForDashboard(List<OrderModel> allOrders) {
+    final filtered = _getFilteredOrders(allOrders);
+    final sorted = List<OrderModel>.from(filtered)..sort(_compareOrdersNewestFirst);
+    final expanded = _showOlderOrders[_selectedFilter] ?? false;
+    if (expanded) return sorted;
+    return sorted.where(_anchorInThisWeekForSelectedFilter).toList();
+  }
+
+  List<OrderModel> _olderOrdersHidden(List<OrderModel> allOrders) {
+    final filtered = _getFilteredOrders(allOrders);
+    final sorted = List<OrderModel>.from(filtered)..sort(_compareOrdersNewestFirst);
+    return sorted.where((o) => !_anchorInThisWeekForSelectedFilter(o)).toList();
   }
 
   List<OrderModel> _getFilteredOrders(List<OrderModel> orders) {
@@ -372,36 +472,124 @@ class _OrdersDashboardScreenState extends State<OrdersDashboardScreen> {
                     );
                   }
 
+                  final olderHidden = _olderOrdersHidden(orderProvider.orders);
+                  final visibleOrders = _visibleOrdersForDashboard(orderProvider.orders);
+                  final expandedOlder = _showOlderOrders[_selectedFilter] ?? false;
+
+                  if (visibleOrders.isEmpty && olderHidden.isNotEmpty && !expandedOlder) {
+                    return RefreshIndicator(
+                      onRefresh: _loadOrders,
+                      color: const Color(0xFFFF6600),
+                      child: ListView(
+                        padding: const EdgeInsets.all(24),
+                        children: [
+                          const SizedBox(height: 48),
+                          const Icon(Icons.date_range, size: 64, color: AppTheme.textSecondary),
+                          const SizedBox(height: 16),
+                          Center(
+                            child: Text(
+                              'No orders from this week on this tab.',
+                              textAlign: TextAlign.center,
+                              style: Theme.of(context).textTheme.titleMedium,
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+                          Center(
+                            child: OutlinedButton(
+                              onPressed: () {
+                                setState(() {
+                                  _showOlderOrders[_selectedFilter] = true;
+                                });
+                              },
+                              child: Text('Show more (${olderHidden.length} older)'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }
+
+                  if (visibleOrders.isEmpty) {
+                    return Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.inbox, size: 64, color: AppTheme.textSecondary),
+                          const SizedBox(height: 16),
+                          Text(
+                            'No orders found',
+                            style: Theme.of(context).textTheme.titleLarge,
+                          ),
+                        ],
+                      ),
+                    );
+                  }
+
                   return RefreshIndicator(
                     onRefresh: _loadOrders,
                     color: const Color(0xFFFF6600),
-                    child: LayoutBuilder(
-                      builder: (context, constraints) {
-                        // Responsive grid: 4 columns on desktop (>1200px), 2 columns on mobile (≤800px)
-                        int crossAxisCount = 2;
-                        if (constraints.maxWidth > 1200) {
-                          crossAxisCount = 4;
-                        } else if (constraints.maxWidth > 800) {
-                          crossAxisCount = 3;
-                        } else {
-                          crossAxisCount = 2;
-                        }
-                        
-                        return GridView.builder(
-                          padding: const EdgeInsets.all(8.0),
-                          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: crossAxisCount,
-                            crossAxisSpacing: 8.0,
-                            mainAxisSpacing: 8.0,
-                            childAspectRatio: constraints.maxWidth > 800 ? 1.35 : 1.25, // Optimized for compact cards
+                    child: Column(
+                      children: [
+                        Expanded(
+                          child: LayoutBuilder(
+                            builder: (context, constraints) {
+                              int crossAxisCount = 2;
+                              if (constraints.maxWidth > 1200) {
+                                crossAxisCount = 4;
+                              } else if (constraints.maxWidth > 800) {
+                                crossAxisCount = 3;
+                              } else {
+                                crossAxisCount = 2;
+                              }
+
+                              return GridView.builder(
+                                padding: const EdgeInsets.all(8.0),
+                                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                                  crossAxisCount: crossAxisCount,
+                                  crossAxisSpacing: 8.0,
+                                  mainAxisSpacing: 8.0,
+                                  childAspectRatio: constraints.maxWidth > 800 ? 1.35 : 1.25,
+                                ),
+                                itemCount: visibleOrders.length,
+                                itemBuilder: (context, index) {
+                                  final order = visibleOrders[index];
+                                  return _buildOrderCard(context, order, constraints.maxWidth);
+                                },
+                              );
+                            },
                           ),
-                      itemCount: filteredOrders.length,
-                          itemBuilder: (context, index) {
-                            final order = filteredOrders[index];
-                            return _buildOrderCard(order, constraints.maxWidth);
-                          },
-                        );
-                      },
+                        ),
+                        if (olderHidden.isNotEmpty && !expandedOlder)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                            child: SizedBox(
+                              width: double.infinity,
+                              child: OutlinedButton(
+                                onPressed: () {
+                                  setState(() {
+                                    _showOlderOrders[_selectedFilter] = true;
+                                  });
+                                },
+                                child: Text('Show more (${olderHidden.length} older)'),
+                              ),
+                            ),
+                          ),
+                        if (olderHidden.isNotEmpty && expandedOlder)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                            child: SizedBox(
+                              width: double.infinity,
+                              child: OutlinedButton(
+                                onPressed: () {
+                                  setState(() {
+                                    _showOlderOrders[_selectedFilter] = false;
+                                  });
+                                },
+                                child: const Text('Show less'),
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                   );
                 },
@@ -423,7 +611,9 @@ class _OrdersDashboardScreenState extends State<OrdersDashboardScreen> {
     );
   }
 
-  Widget _buildOrderCard(OrderModel order, double screenWidth) {
+  Widget _buildOrderCard(BuildContext context, OrderModel order, double screenWidth) {
+    final user = Provider.of<AuthProvider>(context, listen: false).user;
+    final showFinancials = OrderEditEligibility.canViewOrderFinancials(user);
     // CRITICAL FIX: Use workflow service to get effective status
     final effectiveStatus = _workflowService.getEffectiveOrderStatus(order);
     final statusColor = _getStatusColor(effectiveStatus);
@@ -783,7 +973,7 @@ class _OrdersDashboardScreenState extends State<OrdersDashboardScreen> {
                       ),
                     ],
                   ),
-                  if (totalInvoice > 0) ...[
+                  if (showFinancials && totalInvoice > 0) ...[
                     const SizedBox(width: 4),
                     Row(
                       mainAxisSize: MainAxisSize.min,
@@ -801,7 +991,7 @@ class _OrdersDashboardScreenState extends State<OrdersDashboardScreen> {
                       ],
                     ),
                   ],
-                  if (totalToll > 0) ...[
+                  if (showFinancials && totalToll > 0) ...[
                     const SizedBox(width: 4),
                     Row(
                       mainAxisSize: MainAxisSize.min,
@@ -1119,18 +1309,18 @@ class OrderDetailModal extends StatelessWidget {
     // Show dialog with vehicle selection
     final selectedVehicle = await showDialog<VehicleModel?>(
       context: context,
-      builder: (dialogContext) => _VehicleSelectionDialog(
+      builder: (dialogContext) => OrderVehicleSelectionDialog(
         order: order,
         totalWeight: totalWeight,
         apiService: _apiService,
       ),
     );
-    
+
     if (selectedVehicle == null || !context.mounted) {
       // User cancelled or no vehicle selected
       return;
     }
-    
+
     // Show loading indicator
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1221,11 +1411,90 @@ class OrderDetailModal extends StatelessWidget {
     }
   }
 
+  Future<void> _showChangeVehicleOnlyDialog(BuildContext context) async {
+    final totalWeight = order.getTotalWeight();
+    final selectedVehicle = await showDialog<VehicleModel?>(
+      context: context,
+      builder: (dialogContext) => OrderVehicleSelectionDialog(
+        order: order,
+        totalWeight: totalWeight,
+        apiService: _apiService,
+      ),
+    );
+
+    if (selectedVehicle == null || !context.mounted) return;
+
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final userId = authProvider.user?.userId;
+
+    try {
+      final assignResult = await _apiService.assignVehicleToOrder(
+        orderId: order.orderId,
+        vehicleId: selectedVehicle.vehicleId,
+        vehicleNumber: selectedVehicle.vehicleNumber,
+        vehicleType: selectedVehicle.vehicleType.isNotEmpty ? selectedVehicle.vehicleType : selectedVehicle.type,
+        capacityKg: selectedVehicle.capacityKg,
+        userId: userId,
+      );
+
+      if (!context.mounted) return;
+
+      if (assignResult['success'] == true) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Vehicle updated successfully'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 3),
+          ),
+        );
+        onStatusUpdate();
+        Navigator.of(context).pop();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(assignResult['message'] ?? 'Failed to update vehicle'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  void _showAdminSegmentPricingDialog(BuildContext context) {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final user = authProvider.user;
+    if (user == null) return;
+
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => OrderAdminSegmentPricingDialog(
+        order: order,
+        userId: user.userId,
+        onSaved: () {
+          onStatusUpdate();
+          Navigator.of(dialogContext).pop();
+          Navigator.of(context).pop();
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     final user = authProvider.user;
     final isAdmin = user?.role == 'SUPER_USER' || user?.department == 'Admin' || user?.department == 'Accounts Team';
+    final showFinancials = OrderEditEligibility.canViewOrderFinancials(user);
     // CRITICAL FIX: Use workflow service to get effective status
     final effectiveStatus = _workflowService.getEffectiveOrderStatus(order);
     final statusColor = _getStatusColor(effectiveStatus);
@@ -1285,7 +1554,31 @@ class OrderDetailModal extends StatelessWidget {
                 _buildDetailRow('Trip Type', '${order.tripType}${order.isAmended ? " (Amended)" : ""}'),
                 _buildDetailRow('Order Category', order.orderCategory),
                 if (order.vehicleNumber != null && order.vehicleNumber!.isNotEmpty)
-                  _buildDetailRow('Vehicle', order.vehicleNumber!),
+                  _buildDetailRow('Vehicle', order.vehicleNumber!)
+                else
+                  _buildDetailRow('Vehicle', 'Not assigned'),
+                if (OrderEditEligibility.canChangeVehicle(order, _workflowService, user)) ...[
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () => _showChangeVehicleOnlyDialog(context),
+                      icon: const Icon(Icons.edit_road, size: 18),
+                      label: const Text('Change vehicle'),
+                    ),
+                  ),
+                ],
+                if (OrderEditEligibility.canEditSegmentPricing(order, _workflowService, user)) ...[
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () => _showAdminSegmentPricingDialog(context),
+                      icon: const Icon(Icons.currency_rupee, size: 18),
+                      label: const Text('Edit segment pricing (Admin)'),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 12), // Reduced from 16
                 // Trip Segments Display
                 Text(
@@ -1376,7 +1669,8 @@ class OrderDetailModal extends StatelessWidget {
                                     color: AppTheme.textSecondary,
                                   ),
                                 ),
-                                if (segment.invoiceAmount != null || segment.tollCharges != null) ...[
+                                if (showFinancials &&
+                                    (segment.invoiceAmount != null || segment.tollCharges != null)) ...[
                                   const SizedBox(height: 4),
                                   Row(
                                     children: [
@@ -1482,10 +1776,12 @@ class OrderDetailModal extends StatelessWidget {
                   child: Column(
                     children: [
                       _buildTotalRow('Total Weight', '${order.getTotalWeight()} kg', Icons.scale),
-                      const Divider(height: 12), // Reduced from 20
-                      _buildTotalRow('Freight Charges', '₹${order.getTotalInvoiceAmount()}', Icons.attach_money, Colors.green),
-                      const Divider(height: 12), // Reduced from 20
-                      _buildTotalRow('Total Toll', '₹${order.getTotalTollCharges()}', Icons.local_atm, Colors.blue),
+                      if (showFinancials) ...[
+                        const Divider(height: 12), // Reduced from 20
+                        _buildTotalRow('Freight Charges', '₹${order.getTotalInvoiceAmount()}', Icons.attach_money, Colors.green),
+                        const Divider(height: 12), // Reduced from 20
+                        _buildTotalRow('Total Toll', '₹${order.getTotalTollCharges()}', Icons.local_atm, Colors.blue),
+                      ],
                     ],
                   ),
                 ),
@@ -1925,334 +2221,3 @@ class OrderDetailModal extends StatelessWidget {
     );
   }
 }
-
-// Vehicle Selection Dialog for Order Approval
-class _VehicleSelectionDialog extends StatefulWidget {
-  final OrderModel order;
-  final int totalWeight;
-  final ApiService apiService;
-
-  const _VehicleSelectionDialog({
-    required this.order,
-    required this.totalWeight,
-    required this.apiService,
-  });
-
-  @override
-  State<_VehicleSelectionDialog> createState() => _VehicleSelectionDialogState();
-}
-
-class _VehicleSelectionDialogState extends State<_VehicleSelectionDialog> {
-  List<VehicleModel> _matchedVehicles = [];
-  VehicleModel? _selectedVehicle;
-  bool _showManualVehicleEntry = false;
-  bool _isMatchingVehicles = false;
-  
-  // Manual vehicle entry controllers
-  final _manualVehicleNumberController = TextEditingController();
-  final _manualVehicleTypeController = TextEditingController();
-  final _manualCapacityController = TextEditingController();
-  String? _manualVehicleType;
-  
-  final List<String> _vehicleTypeOptions = ['Open', 'Closed', 'Container'];
-
-  @override
-  void initState() {
-    super.initState();
-    _matchVehicles();
-  }
-
-  @override
-  void dispose() {
-    _manualVehicleNumberController.dispose();
-    _manualVehicleTypeController.dispose();
-    _manualCapacityController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _matchVehicles() async {
-    setState(() {
-      _isMatchingVehicles = true;
-      _showManualVehicleEntry = false;
-    });
-
-    try {
-      final result = await widget.apiService.matchVehicles(widget.totalWeight);
-      if (result['success'] == true) {
-        setState(() {
-          _matchedVehicles = result['vehicles'] as List<VehicleModel>;
-          _selectedVehicle = null;
-          if (_matchedVehicles.isEmpty) {
-            _showManualVehicleEntry = true;
-          }
-        });
-      }
-    } catch (e) {
-      // Handle error
-    } finally {
-      setState(() {
-        _isMatchingVehicles = false;
-      });
-    }
-  }
-
-  void _handleConfirm() {
-    if (_selectedVehicle != null) {
-      Navigator.of(context).pop(_selectedVehicle);
-    } else if (_showManualVehicleEntry) {
-      if (_manualVehicleNumberController.text.trim().isEmpty ||
-          _manualVehicleType == null ||
-          _manualCapacityController.text.trim().isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Please complete all manual vehicle entry fields'),
-            backgroundColor: Colors.red,
-          ),
-        );
-        return;
-      }
-      
-      // Create a manual vehicle entry
-      final manualVehicle = VehicleModel(
-        vehicleId: '',
-        vehicleNumber: _manualVehicleNumberController.text.trim(),
-        type: _manualVehicleType!,
-        capacityKg: int.tryParse(_manualCapacityController.text.trim()) ?? 0,
-        vehicleType: _manualVehicleType!,
-        vendorVehicle: 'manual_entry',
-        isBusy: false,
-      );
-      Navigator.of(context).pop(manualVehicle);
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please select a vehicle or use manual entry'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Dialog(
-      backgroundColor: AppTheme.darkCard,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: const BorderSide(color: AppTheme.darkBorder, width: 0.5),
-      ),
-      child: Container(
-        constraints: const BoxConstraints(maxWidth: 500, maxHeight: 600),
-        child: SingleChildScrollView(
-          child: Padding(
-            padding: const EdgeInsets.all(20.0),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text(
-                      'Assign Vehicle to Order',
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: AppTheme.textPrimary,
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.close, color: AppTheme.textSecondary),
-                      onPressed: () => Navigator.of(context).pop(),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  'Order ${widget.order.orderId} - Total Weight: ${widget.totalWeight} kg',
-                  style: const TextStyle(
-                    fontSize: 14,
-                    color: AppTheme.textSecondary,
-                  ),
-                ),
-                const SizedBox(height: 24),
-                if (_isMatchingVehicles)
-                  const Center(child: CircularProgressIndicator())
-                else if (_matchedVehicles.isEmpty && !_showManualVehicleEntry)
-                  Card(
-                    color: Colors.orange.shade50,
-                    child: Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: Column(
-                        children: [
-                          const Text(
-                            'No suitable vehicles found',
-                            style: TextStyle(fontWeight: FontWeight.w600),
-                          ),
-                          const SizedBox(height: 8),
-                          const Text(
-                            'Use the "Add Manual Truck Entry" button below.',
-                            style: TextStyle(fontSize: 14),
-                            textAlign: TextAlign.center,
-                          ),
-                        ],
-                      ),
-                    ),
-                  )
-                else
-                  ...(_matchedVehicles.map((vehicle) => Padding(
-                    padding: const EdgeInsets.only(bottom: 12.0),
-                    child: _buildVehicleCard(vehicle),
-                  ))),
-                const SizedBox(height: 16),
-                Card(
-                  color: Colors.orange.shade50,
-                  child: ListTile(
-                    leading: const Icon(Icons.add_circle, color: Colors.orange),
-                    title: const Text('Add Manual Truck Entry'),
-                    onTap: () {
-                      setState(() {
-                        _showManualVehicleEntry = !_showManualVehicleEntry;
-                        if (_showManualVehicleEntry) {
-                          _selectedVehicle = null;
-                        }
-                      });
-                    },
-                  ),
-                ),
-                if (_showManualVehicleEntry) ...[
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: _manualVehicleNumberController,
-                    decoration: const InputDecoration(
-                      labelText: 'Vehicle Number',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  DropdownButtonFormField<String>(
-                    value: _manualVehicleType,
-                    decoration: const InputDecoration(
-                      labelText: 'Vehicle Type',
-                      border: OutlineInputBorder(),
-                    ),
-                    items: _vehicleTypeOptions.map((type) {
-                      return DropdownMenuItem(
-                        value: type,
-                        child: Text(type),
-                      );
-                    }).toList(),
-                    onChanged: (value) {
-                      setState(() {
-                        _manualVehicleType = value;
-                      });
-                    },
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: _manualCapacityController,
-                    decoration: const InputDecoration(
-                      labelText: 'Capacity (kg)',
-                      border: OutlineInputBorder(),
-                    ),
-                    keyboardType: TextInputType.number,
-                  ),
-                ],
-                const SizedBox(height: 24),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    TextButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      child: const Text('Cancel'),
-                    ),
-                    const SizedBox(width: 8),
-                    ElevatedButton(
-                      onPressed: _handleConfirm,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green,
-                        foregroundColor: Colors.white,
-                      ),
-                      child: const Text('Assign & Continue'),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildVehicleCard(VehicleModel vehicle) {
-    final isSelected = _selectedVehicle?.vehicleId == vehicle.vehicleId;
-    final isOptimal = vehicle.utilizationPercentage != null && 
-                      vehicle.utilizationPercentage! >= 80 && 
-                      vehicle.utilizationPercentage! <= 100;
-
-    return Card(
-      elevation: isSelected ? 4 : 1,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(
-          color: isSelected 
-              ? AppTheme.primaryOrange 
-              : (isOptimal ? Colors.green : Colors.grey.shade300),
-          width: isSelected ? 2 : 1,
-        ),
-      ),
-      child: InkWell(
-        onTap: () {
-          setState(() {
-            _selectedVehicle = vehicle;
-            _showManualVehicleEntry = false;
-          });
-        },
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    vehicle.vehicleNumber,
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: isSelected ? AppTheme.primaryOrange : AppTheme.textPrimary,
-                    ),
-                  ),
-                  if (isSelected)
-                    const Icon(Icons.check_circle, color: AppTheme.primaryOrange),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Text('Type: ${vehicle.vehicleType.isNotEmpty ? vehicle.vehicleType : vehicle.type}'),
-                  const SizedBox(width: 16),
-                  Text('Capacity: ${vehicle.capacityKg} kg'),
-                ],
-              ),
-              if (vehicle.utilizationPercentage != null) ...[
-                const SizedBox(height: 8),
-                Text(
-                  'Utilization: ${vehicle.utilizationPercentage!.toStringAsFixed(1)}%',
-                  style: TextStyle(
-                    color: isOptimal ? Colors.green : Colors.orange,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-

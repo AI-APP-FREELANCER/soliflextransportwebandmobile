@@ -286,6 +286,7 @@ class _RFQCreateScreenState extends State<RFQCreateScreen> {
       final result = await _apiService.calculateInvoiceRate(
         sourceLocation: _selectedSource!,
         materialWeight: weight,
+        tripType: _selectedTripType,
       );
       
       if (result['success'] == true) {

@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const csvService = require('../services/csvDatabaseService');
+const csvService = require('../services/dataService');
 
 // GET /api/vendors - Get all vendors
 router.get('/vendors', async (req, res) => {

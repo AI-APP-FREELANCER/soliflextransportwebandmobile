@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const csvService = require('../services/csvDatabaseService');
+const csvService = require('../services/dataService');
 const notificationService = require('../services/notificationService');
 
 // GET /api/orders - Get all orders
@@ -355,10 +355,12 @@ router.post('/create-order', async (req, res) => {
             tripType // Pass tripType to force Drop rates
           );
         } else {
-          // Single/Round/Internal: Use source-only calculation (backward compatible)
+          // Single/Round/Internal: source-only; trip_type drives pick vs pick+drop vs legacy
           rateResult = await csvService.calculateInvoiceRate(
-            segment.source, // Use segment's own source
-            segment.material_weight // Use segment's own weight
+            segment.source,
+            segment.material_weight,
+            null,
+            tripType || originalTripType
           );
         }
         
@@ -630,6 +632,35 @@ router.post('/assign-vehicle-to-order', async (req, res) => {
         message: 'Order not found'
       });
     }
+
+    // Block vehicle changes once order is terminal (completed / rejected / cancelled)
+    let segments = [];
+    try {
+      if (order.trip_segments && order.trip_segments.trim() !== '') {
+        segments = JSON.parse(order.trip_segments);
+      }
+    } catch (e) {
+      segments = [];
+    }
+    const statusNorm = (order.order_status || '').trim().toUpperCase();
+    if (statusNorm === 'COMPLETED' || statusNorm === 'REJECTED' || statusNorm === 'CANCELLED' || statusNorm === 'CANCELED') {
+      return res.status(400).json({
+        success: false,
+        message: 'Vehicle cannot be changed after the order is completed, rejected, or cancelled.'
+      });
+    }
+    if (csvService.isOrderCompleted(order, segments)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Vehicle cannot be changed after the order workflow is fully completed.'
+      });
+    }
+    if (csvService.isOrderRejected(order, segments)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Vehicle cannot be changed after the order has been rejected or cancelled.'
+      });
+    }
     
     // Check if order already has a vehicle
     if (order.vehicle_id && order.vehicle_id.trim() !== '') {
@@ -665,6 +696,119 @@ router.post('/assign-vehicle-to-order', async (req, res) => {
     });
   } catch (error) {
     console.error('Assign vehicle error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});
+
+function isSegmentPricingAdminUser(user) {
+  if (!user) return false;
+  if (user.role === 'SUPER_USER') return true;
+  const d = (user.department || '').trim();
+  return d === 'Admin' || d === 'Accounts Team';
+}
+
+/** Block pricing edits only once the order is finished (completed, rejected, cancelled, closed) or workflow-terminal. */
+function isOrderTerminalForSegmentPricing(order, tripSegments) {
+  const statusNorm = (order.order_status || '').trim().toUpperCase();
+  if (['COMPLETED', 'REJECTED', 'CANCELLED', 'CANCELED', 'CLOSED'].includes(statusNorm)) {
+    return true;
+  }
+  try {
+    if (csvService.isOrderRejected(order, tripSegments)) return true;
+    if (csvService.isOrderCompleted(order, tripSegments)) return true;
+  } catch (e) {
+    console.error('isOrderTerminalForSegmentPricing', e);
+  }
+  return false;
+}
+
+// POST /api/admin/update-order-segment-pricing — Admin/Accounts; allowed until order is terminal (may repeat)
+router.post('/admin/update-order-segment-pricing', async (req, res) => {
+  try {
+    const { orderId, userId, segments: segmentUpdates } = req.body;
+
+    if (!orderId || !userId || !segmentUpdates || !Array.isArray(segmentUpdates) || segmentUpdates.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'orderId, userId, and a non-empty segments array are required'
+      });
+    }
+
+    const user = await csvService.getUserById(String(userId));
+    if (!user || !isSegmentPricingAdminUser(user)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Only Admin or Accounts Team may update segment pricing.'
+      });
+    }
+
+    const order = await csvService.getOrderById(orderId);
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: 'Order not found'
+      });
+    }
+
+    let tripSegments = [];
+    try {
+      if (order.trip_segments && order.trip_segments.trim() !== '') {
+        tripSegments = JSON.parse(order.trip_segments);
+      }
+    } catch (e) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid trip_segments data on order'
+      });
+    }
+
+    if (!Array.isArray(tripSegments) || tripSegments.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Order has no segments to update'
+      });
+    }
+
+    if (isOrderTerminalForSegmentPricing(order, tripSegments)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Segment pricing cannot be edited after the order is completed, rejected, or cancelled.'
+      });
+    }
+
+    for (const upd of segmentUpdates) {
+      const sid = upd.segment_id !== undefined ? parseInt(String(upd.segment_id), 10) : NaN;
+      if (Number.isNaN(sid)) continue;
+      const idx = tripSegments.findIndex((s) => parseInt(String(s.segment_id), 10) === sid);
+      if (idx < 0) continue;
+      if (upd.invoice_amount !== undefined && upd.invoice_amount !== null) {
+        tripSegments[idx].invoice_amount = parseInt(String(upd.invoice_amount), 10) || 0;
+      }
+      if (upd.toll_charges !== undefined && upd.toll_charges !== null) {
+        tripSegments[idx].toll_charges = parseInt(String(upd.toll_charges), 10) || 0;
+      }
+      tripSegments[idx].is_manual_invoice = 'Yes';
+    }
+
+    order.trip_segments = JSON.stringify(tripSegments);
+    const orderTripType = order.original_trip_type || order.trip_type || 'Single-Trip-Vendor';
+    const totals = csvService.calculateOrderTotals(order.trip_segments, orderTripType);
+    order.total_weight = String(totals.total_weight ?? 0);
+    order.total_invoice_amount = String(totals.total_invoice_amount ?? 0);
+    order.total_toll_charges = String(totals.total_toll_charges ?? 0);
+
+    await csvService.writeOrder(order);
+
+    return res.json({
+      success: true,
+      message: 'Segment pricing updated',
+      order: await csvService.getOrderById(orderId)
+    });
+  } catch (error) {
+    console.error('update-order-segment-pricing error:', error);
     return res.status(500).json({
       success: false,
       message: 'Internal server error'
@@ -1031,15 +1175,16 @@ router.post('/amend-order', async (req, res) => {
             order.trip_type || order.original_trip_type // Pass tripType to force Drop rates
           );
         } else {
-          // Round Trip: Use drop rates (source is vendor)
           rateResult = await csvService.calculateInvoiceRate(
-            segment.source, // Vendor location (source for drop rates)
-            segment.material_weight // Weight from amendment modal input
+            segment.source,
+            segment.material_weight,
+            null,
+            order.trip_type || order.original_trip_type
           );
         }
         
-        console.log(`[Amendment Segment ${i + 1}] Calculated using drop rates:`);
-        console.log(`  Source: ${segment.source} (Vendor - uses dropped_by_vendor rates)`);
+        console.log(`[Amendment Segment ${i + 1}] Calculated (source-only, trip_type=${order.trip_type || order.original_trip_type || 'n/a'}):`);
+        console.log(`  Source: ${segment.source}`);
         console.log(`  Weight: ${segment.material_weight} kg`);
         console.log(`  Invoice: ₹${rateResult.invoice_amount}`);
         console.log(`  Toll: ₹${rateResult.toll_charges}`);
