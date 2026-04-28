@@ -40,17 +40,18 @@ class _AmendmentModalState extends State<AmendmentModal> {
   @override
   void initState() {
     super.initState();
+    _liveOrder = widget.order;
     // For Round Trip: Initialize with single empty segment (B → C)
     // For Round Trip: Source should be B (destination of segment 1, not last segment's destination)
     // For other trip types: Initialize with one empty segment from last segment's destination
     String sourceForNewSegment = '';
-    if (widget.order.tripSegments.isNotEmpty) {
+    if (_liveOrder.tripSegments.isNotEmpty) {
       if (_isRoundTrip()) {
         // For Round Trip: Source is B (destination of segment 1: A → B)
-        sourceForNewSegment = widget.order.tripSegments[0].destination;
+        sourceForNewSegment = _liveOrder.tripSegments[0].destination;
       } else {
         // For other trip types: Source is the last segment's destination
-        sourceForNewSegment = widget.order.tripSegments.last.destination;
+        sourceForNewSegment = _liveOrder.tripSegments.last.destination;
       }
     }
     _newSegments.add({
@@ -289,7 +290,9 @@ class _AmendmentModalState extends State<AmendmentModal> {
                       const SizedBox(width: 8),
                       ElevatedButton(
                         onPressed: () {
-                          if (_formKey.currentState!.validate()) {
+                          final form = _formKey.currentState;
+                          if (form == null) return;
+                          if (form.validate()) {
                             // Part 2: Parse string state to int before submission
                             for (var segment in _newSegments) {
                               if (segment['_invoice_string'] != null) {
@@ -746,7 +749,7 @@ class _AmendmentModalState extends State<AmendmentModal> {
             },
             builder: (field) {
               List<String> selectedTypes = (segment['selected_material_types'] as List<String>?) ?? [];
-              String otherText = (segment['other_material_text']?.toString() ?? '') ?? '';
+              String otherText = (segment['other_material_text']?.toString() ?? '');
               
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,

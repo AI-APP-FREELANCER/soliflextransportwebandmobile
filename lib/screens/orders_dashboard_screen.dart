@@ -1215,17 +1215,17 @@ class OrderDetailModal extends StatelessWidget {
   }
 
   void _showAmendmentModal(BuildContext context, OrderModel order) {
-    Navigator.of(context).pop(); // Close detail modal first
+    final detailContext = context;
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     final user = authProvider.user;
     
     showDialog(
-      context: context,
-      builder: (context) => AmendmentModal(
+      context: detailContext,
+      builder: (dialogContext) => AmendmentModal(
         order: order,
         onAmend: (newSegments) async {
           if (user == null) {
-            ScaffoldMessenger.of(context).showSnackBar(
+            ScaffoldMessenger.of(detailContext).showSnackBar(
               const SnackBar(
                 content: Text('User not found. Please login again.'),
                 backgroundColor: Colors.red,
@@ -1234,15 +1234,15 @@ class OrderDetailModal extends StatelessWidget {
             return;
           }
           
-          final orderProvider = Provider.of<OrderProvider>(context, listen: false);
+          final orderProvider = Provider.of<OrderProvider>(detailContext, listen: false);
           final result = await orderProvider.amendOrder(
             orderId: order.orderId,
             newSegments: newSegments,
             userId: user.userId, // Pass userId for audit trail
           );
           
-          if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
+          if (detailContext.mounted) {
+            ScaffoldMessenger.of(detailContext).showSnackBar(
               SnackBar(
                 content: Text(result['message'] ?? 'Order amended'),
                 backgroundColor: result['success'] == true ? Colors.green : Colors.red,
@@ -1250,7 +1250,10 @@ class OrderDetailModal extends StatelessWidget {
             );
             
             if (result['success'] == true) {
-              Navigator.of(context).pop(); // Close amendment modal
+              Navigator.of(dialogContext).pop(); // Close amendment modal
+              if (detailContext.mounted) {
+                Navigator.of(detailContext).pop(); // Close detail modal
+              }
               onStatusUpdate(); // Reload orders
             }
           }
