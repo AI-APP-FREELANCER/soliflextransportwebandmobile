@@ -1112,7 +1112,8 @@ function calculateOrderTotals(tripSegments, orderTripType = null) {
   let totalWeight = 0;
   let totalInvoiceAmount = 0;
   let totalTollCharges = 0;
-  
+  let totalOtherCharges = 0;
+
   let segments = [];
   if (Array.isArray(tripSegments)) {
     segments = tripSegments;
@@ -1124,14 +1125,14 @@ function calculateOrderTotals(tripSegments, orderTripType = null) {
       }
     } catch (e) {
       console.error('Error parsing trip_segments in calculateOrderTotals:', e);
-      return { total_weight: 0, total_invoice_amount: 0, total_toll_charges: 0 };
+      return { total_weight: 0, total_invoice_amount: 0, total_toll_charges: 0, total_other_charges: 0 };
     }
   }
-  
+
   // Check if this is a Round Trip order
   const isRoundTrip = orderTripType === 'Round-Trip-Vendor';
   const isMultipleTrip = orderTripType === 'Multiple-Trip-Vendor';
-  
+
   if (isRoundTrip && segments.length >= 2) {
     // Part 3: Round Trip logic: Only chargeable segments contribute
     if (segments.length === 2) {
@@ -1141,7 +1142,8 @@ function calculateOrderTotals(tripSegments, orderTripType = null) {
       totalWeight += parseInt(segment1.material_weight || '0') || 0;
       totalInvoiceAmount += parseInt(segment1.invoice_amount || '0') || 0;
       totalTollCharges += parseInt(segment1.toll_charges || '0') || 0;
-      
+      totalOtherCharges += parseInt(segment1.other_charges || '0') || 0;
+
       console.log(`[Round Trip Totals] Initial Round Trip (2 segments):`);
       console.log(`  Segment 1 (chargeable): Weight: ${segment1.material_weight} kg, Invoice: ₹${segment1.invoice_amount}`);
       console.log(`  Segment 2 (non-chargeable): Weight: ${segments[1].material_weight} kg, Invoice: ₹${segments[1].invoice_amount} (excluded)`);
@@ -1150,15 +1152,17 @@ function calculateOrderTotals(tripSegments, orderTripType = null) {
       // Middle segments (B → C) are display-only and do not contribute
       const segment1 = segments[0]; // Segment 1: A → B (chargeable)
       const finalSegment = segments[segments.length - 1]; // Final segment: C → A (chargeable)
-      
+
       totalWeight += parseInt(segment1.material_weight || '0') || 0;
       totalInvoiceAmount += parseInt(segment1.invoice_amount || '0') || 0;
       totalTollCharges += parseInt(segment1.toll_charges || '0') || 0;
-      
+      totalOtherCharges += parseInt(segment1.other_charges || '0') || 0;
+
       totalWeight += parseInt(finalSegment.material_weight || '0') || 0;
       totalInvoiceAmount += parseInt(finalSegment.invoice_amount || '0') || 0;
       totalTollCharges += parseInt(finalSegment.toll_charges || '0') || 0;
-      
+      totalOtherCharges += parseInt(finalSegment.other_charges || '0') || 0;
+
       console.log(`[Round Trip Totals] Amended Round Trip (${segments.length} segments):`);
       console.log(`  Segment 1 (chargeable): Weight: ${segment1.material_weight} kg, Invoice: ₹${segment1.invoice_amount}`);
       for (let i = 1; i < segments.length - 1; i++) {
@@ -1173,28 +1177,31 @@ function calculateOrderTotals(tripSegments, orderTripType = null) {
       const segmentWeight = parseInt(segment.material_weight || '0') || 0;
       const segmentInvoice = parseInt(segment.invoice_amount || '0') || 0;
       const segmentToll = parseInt(segment.toll_charges || '0') || 0;
-      
+      const segmentOther = parseInt(segment.other_charges || '0') || 0;
+
       totalWeight += segmentWeight;
       totalInvoiceAmount += segmentInvoice;
       totalTollCharges += segmentToll;
-      
+      totalOtherCharges += segmentOther;
+
       // Part 1: Log for Multiple Trip to show cumulative addition
       if (isMultipleTrip) {
         console.log(`[Multiple Trip Totals] Segment ${index + 1}: ${segment.source} → ${segment.destination} (Weight: ${segmentWeight} kg, Invoice: ₹${segmentInvoice}, Toll: ₹${segmentToll}) - CONTRIBUTES`);
       }
     });
-    
+
     // Part 1: Log final totals for Multiple Trip
     if (isMultipleTrip && segments.length > 0) {
       console.log(`[Multiple Trip Totals] Final totals: Total Weight: ${totalWeight} kg, Total Invoice: ₹${totalInvoiceAmount}, Total Toll: ₹${totalTollCharges}`);
       console.log(`  All ${segments.length} segments contribute to totals (cumulative sum)`);
     }
   }
-  
+
   return {
     total_weight: totalWeight,
     total_invoice_amount: totalInvoiceAmount,
-    total_toll_charges: totalTollCharges
+    total_toll_charges: totalTollCharges,
+    total_other_charges: totalOtherCharges
   };
 }
 

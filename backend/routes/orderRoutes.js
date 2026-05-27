@@ -790,6 +790,12 @@ router.post('/admin/update-order-segment-pricing', async (req, res) => {
       if (upd.toll_charges !== undefined && upd.toll_charges !== null) {
         tripSegments[idx].toll_charges = parseInt(String(upd.toll_charges), 10) || 0;
       }
+      if (upd.other_charges !== undefined && upd.other_charges !== null) {
+        tripSegments[idx].other_charges = parseInt(String(upd.other_charges), 10) || 0;
+      }
+      if (upd.other_charges_description !== undefined) {
+        tripSegments[idx].other_charges_description = String(upd.other_charges_description || '');
+      }
       tripSegments[idx].is_manual_invoice = 'Yes';
     }
 
@@ -799,6 +805,7 @@ router.post('/admin/update-order-segment-pricing', async (req, res) => {
     order.total_weight = String(totals.total_weight ?? 0);
     order.total_invoice_amount = String(totals.total_invoice_amount ?? 0);
     order.total_toll_charges = String(totals.total_toll_charges ?? 0);
+    order.total_other_charges = String(totals.total_other_charges ?? 0);
 
     await csvService.writeOrder(order);
 

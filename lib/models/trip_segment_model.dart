@@ -10,6 +10,8 @@ class TripSegment {
   final String segmentStatus; // Pending, In-Progress, Completed
   final int? invoiceAmount;
   final int? tollCharges;
+  final int? otherCharges;
+  final String? otherChargesDescription;
   final bool? isManualInvoice; // Flag to indicate if invoice/toll was manually overridden
   final List<WorkflowStep> workflow; // Workflow steps for this segment
 
@@ -22,6 +24,8 @@ class TripSegment {
     required this.segmentStatus,
     this.invoiceAmount,
     this.tollCharges,
+    this.otherCharges,
+    this.otherChargesDescription,
     this.isManualInvoice,
     List<WorkflowStep>? workflow,
   }) : workflow = workflow ?? [];
@@ -88,6 +92,12 @@ class TripSegment {
               ? json['toll_charges']
               : int.tryParse(json['toll_charges'].toString()))
           : null,
+      otherCharges: json['other_charges'] != null
+          ? (json['other_charges'] is int
+              ? json['other_charges']
+              : int.tryParse(json['other_charges'].toString()))
+          : null,
+      otherChargesDescription: json['other_charges_description']?.toString(),
       isManualInvoice: json['is_manual_invoice'] != null
           ? (json['is_manual_invoice'] is bool
               ? json['is_manual_invoice']
@@ -107,6 +117,8 @@ class TripSegment {
       'segment_status': segmentStatus,
       if (invoiceAmount != null) 'invoice_amount': invoiceAmount,
       if (tollCharges != null) 'toll_charges': tollCharges,
+      if (otherCharges != null) 'other_charges': otherCharges,
+      if (otherChargesDescription != null) 'other_charges_description': otherChargesDescription,
       'is_manual_invoice': (isManualInvoice ?? false) ? 'Yes' : 'No',
       'workflow': workflow.map((w) => w.toJson()).toList(),
     };

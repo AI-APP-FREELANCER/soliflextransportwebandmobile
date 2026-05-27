@@ -6,6 +6,7 @@ import '../models/order_model.dart';
 import '../models/vehicle_model.dart';
 import '../services/api_service.dart';
 import '../theme/app_theme.dart';
+import '../utils/export_utils.dart';
 import '../utils/order_edit_eligibility.dart';
 import '../utils/permission_utils.dart';
 import '../widgets/notification_badge.dart';
@@ -23,6 +24,8 @@ final RouteObserver<PageRoute> homeRouteObserver = RouteObserver<PageRoute>();
 
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, RouteAware {
   String _selectedDateRange = 'Current Week';
+  DateTime? _customFromDate;
+  DateTime? _customToDate;
   List<VehicleModel> _vehicles = [];
   bool _isLoadingVehicles = false;
 
@@ -111,8 +114,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
         return now.subtract(const Duration(days: 15));
       case 'Month to Date':
         return DateTime(now.year, now.month, 1);
+      case 'Custom Range':
+        return _customFromDate ?? DateTime(2020, 1, 1);
       default:
-        return DateTime(2020, 1, 1); // All time
+        return DateTime(2020, 1, 1);
     }
   }
 
@@ -122,8 +127,30 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
       case 'Previous Week':
         final startOfWeek = now.subtract(Duration(days: now.weekday - 1));
         return startOfWeek.subtract(const Duration(days: 1));
+      case 'Custom Range':
+        return _customToDate != null
+            ? DateTime(_customToDate!.year, _customToDate!.month, _customToDate!.day, 23, 59, 59)
+            : now;
       default:
         return now;
+    }
+  }
+
+  Future<void> _openCustomDateRangePicker() async {
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2020, 1, 1),
+      lastDate: DateTime.now(),
+      initialDateRange: (_customFromDate != null && _customToDate != null)
+          ? DateTimeRange(start: _customFromDate!, end: _customToDate!)
+          : null,
+    );
+    if (picked != null && mounted) {
+      setState(() {
+        _customFromDate = picked.start;
+        _customToDate = picked.end;
+        _selectedDateRange = 'Custom Range';
+      });
     }
   }
 
@@ -441,14 +468,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
                                                   color: AppTheme.textPrimary,
                                                   fontSize: 13,
                                                 ),
-                                                items: ['Current Week', 'Previous Week', 'Last 15 Days', 'Month to Date']
+                                                items: ['Current Week', 'Previous Week', 'Last 15 Days', 'Month to Date', 'Custom Range']
                                                     .map((range) => DropdownMenuItem(
                                                           value: range,
-                                                          child: Text(range),
+                                                          child: Text(range == 'Custom Range' && _customFromDate != null && _customToDate != null
+                                                              ? '${_customFromDate!.day}/${_customFromDate!.month}/${_customFromDate!.year} – ${_customToDate!.day}/${_customToDate!.month}/${_customToDate!.year}'
+                                                              : range),
                                                         ))
                                                     .toList(),
                                                 onChanged: (value) {
-                                                  if (value != null) {
+                                                  if (value == 'Custom Range') {
+                                                    _openCustomDateRangePicker();
+                                                  } else if (value != null) {
                                                     setState(() => _selectedDateRange = value);
                                                   }
                                                 },
@@ -1034,13 +1065,40 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Truck Utilization Analysis (80-100%)',
-          style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                color: AppTheme.textPrimary,
-                fontWeight: FontWeight.bold,
-                fontSize: 14,
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Truck Utilization Analysis (80-100%)',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      color: AppTheme.textPrimary,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
               ),
+            ),
+            TextButton.icon(
+              onPressed: () {
+                final rows = <List<dynamic>>[
+                  ['Order ID', 'Vehicle', 'Weight (kg)', 'Capacity (kg)', 'Utilization %'],
+                  ...utilizationData.map((d) => [
+                        d['orderId'],
+                        d['vehicle'],
+                        d['weight'],
+                        d['capacity'],
+                        '${(d['utilization'] as double).toStringAsFixed(1)}%',
+                      ]),
+                ];
+                ExportUtils.downloadCsv('truck_utilization_${_selectedDateRange.replaceAll(' ', '_')}.csv', rows);
+              },
+              icon: const Icon(Icons.download, size: 14),
+              label: const Text('Export', style: TextStyle(fontSize: 12)),
+              style: TextButton.styleFrom(
+                foregroundColor: AppTheme.primaryOrange,
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: 8),
         // Table Container - Proper scrolling structure
@@ -1258,16 +1316,66 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
       );
     }
 
+    // Pre-compute rows for both display and export
+    final financialRows = ordersByType.entries.map((entry) {
+      final type = entry.key;
+      final typeOrders = entry.value;
+      final totalCost = typeOrders.fold<int>(
+        0,
+        (sum, order) => sum + order.getTotalInvoiceAmount() + order.getTotalTollCharges() + order.getTotalOtherCharges(),
+      );
+      final totalWeight = typeOrders.fold<int>(
+        0,
+        (sum, order) => sum + order.getTotalWeight(),
+      );
+      final avgCostPerOrder = typeOrders.isNotEmpty ? totalCost / typeOrders.length : 0.0;
+      final avgCostPerKg = totalWeight > 0 ? totalCost / totalWeight : 0.0;
+      return {
+        'type': type,
+        'orders': typeOrders.length,
+        'totalCost': totalCost,
+        'avgCostPerOrder': avgCostPerOrder,
+        'avgCostPerKg': avgCostPerKg,
+      };
+    }).toList();
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Financial Breakdown by Trip Type',
-          style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                color: AppTheme.textPrimary,
-                fontWeight: FontWeight.bold,
-                fontSize: 14,
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Financial Breakdown by Trip Type',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      color: AppTheme.textPrimary,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
               ),
+            ),
+            TextButton.icon(
+              onPressed: () {
+                final rows = <List<dynamic>>[
+                  ['Trip Type', 'Orders', 'Total Cost (₹)', 'Avg/Order (₹)', 'Avg/kg (₹)'],
+                  ...financialRows.map((r) => [
+                        (r['type'] as String).replaceAll('-Trip-Vendor', '').replaceAll('-', ' '),
+                        r['orders'],
+                        r['totalCost'],
+                        (r['avgCostPerOrder'] as double).toStringAsFixed(0),
+                        (r['avgCostPerKg'] as double).toStringAsFixed(2),
+                      ]),
+                ];
+                ExportUtils.downloadCsv('financial_breakdown_${_selectedDateRange.replaceAll(' ', '_')}.csv', rows);
+              },
+              icon: const Icon(Icons.download, size: 14),
+              label: const Text('Export', style: TextStyle(fontSize: 12)),
+              style: TextButton.styleFrom(
+                foregroundColor: AppTheme.primaryOrange,
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: 8),
         // Table Container - Proper scrolling structure
@@ -1347,21 +1455,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
                 ),
                 child: ListView.builder(
                   shrinkWrap: true,
-                  itemCount: ordersByType.length,
+                  itemCount: financialRows.length,
                   itemBuilder: (context, index) {
-                    final entry = ordersByType.entries.elementAt(index);
-                    final type = entry.key;
-                    final typeOrders = entry.value;
-                    final totalCost = typeOrders.fold<int>(
-                      0,
-                      (sum, order) => sum + order.getTotalInvoiceAmount() + order.getTotalTollCharges(),
-                    );
-                    final totalWeight = typeOrders.fold<int>(
-                      0,
-                      (sum, order) => sum + order.getTotalWeight(),
-                    );
-                    final avgCostPerOrder = typeOrders.isNotEmpty ? totalCost / typeOrders.length : 0.0;
-                    final avgCostPerKg = totalWeight > 0 ? totalCost / totalWeight : 0.0;
+                    final row = financialRows[index];
+                    final type = row['type'] as String;
+                    final totalCost = row['totalCost'] as int;
+                    final avgCostPerOrder = row['avgCostPerOrder'] as double;
+                    final avgCostPerKg = row['avgCostPerKg'] as double;
 
                     return Container(
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -1465,10 +1565,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
           ),
         );
         if (vehicle.capacityKg > 0) {
-          final utilization = (order.getTotalWeight() / vehicle.capacityKg) * 100;
+          final weightUsed = order.getTotalWeight();
+          final utilization = (weightUsed / vehicle.capacityKg) * 100;
           if (utilization < 80) {
+            final firstSeg = order.tripSegments.isNotEmpty ? order.tripSegments.first : null;
+            final lastSeg = order.tripSegments.isNotEmpty ? order.tripSegments.last : null;
             lowUtilizationOrders.add({
               'orderId': order.orderId,
+              'vehicleNumber': order.vehicleNumber ?? 'N/A',
+              'capacityKg': vehicle.capacityKg,
+              'weightUsed': weightUsed,
+              'from': firstSeg?.source ?? order.source,
+              'to': lastSeg?.destination ?? order.destination,
               'utilization': utilization,
             });
           }
@@ -1577,16 +1685,42 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
               children: [
                 Row(
                   children: [
-                    Icon(Icons.lightbulb_outline, size: 16, color: Colors.amber),
+                    const Icon(Icons.lightbulb_outline, size: 16, color: Colors.amber),
                     const SizedBox(width: 8),
-                    Text(
-                      'Cost Saving Suggestions',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 12,
-                        color: AppTheme.textPrimary,
+                    const Expanded(
+                      child: Text(
+                        'Cost Saving Suggestions',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                          color: AppTheme.textPrimary,
+                        ),
                       ),
                     ),
+                    if (lowUtilizationOrders.isNotEmpty)
+                      TextButton.icon(
+                        onPressed: () {
+                          final rows = <List<dynamic>>[
+                            ['Order ID', 'Truck Number', 'Capacity (kg)', 'Weight Used (kg)', 'From', 'To', 'Utilization %'],
+                            ...lowUtilizationOrders.map((d) => [
+                                  d['orderId'],
+                                  d['vehicleNumber'],
+                                  d['capacityKg'],
+                                  d['weightUsed'],
+                                  d['from'],
+                                  d['to'],
+                                  '${(d['utilization'] as double).toStringAsFixed(1)}%',
+                                ]),
+                          ];
+                          ExportUtils.downloadCsv('low_utilization_${_selectedDateRange.replaceAll(' ', '_')}.csv', rows);
+                        },
+                        icon: const Icon(Icons.download, size: 14),
+                        label: const Text('Export', style: TextStyle(fontSize: 12)),
+                        style: TextButton.styleFrom(
+                          foregroundColor: Colors.amber,
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        ),
+                      ),
                   ],
                 ),
                 const SizedBox(height: 8),
@@ -1611,11 +1745,83 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
                         ),
                       ),
                       const SizedBox(height: 4),
-                      Text(
+                      const Text(
                         'Consider consolidating smaller orders or using smaller vehicles to improve efficiency and reduce costs.',
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 11,
                           color: AppTheme.textSecondary,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      // Table header
+                      Container(
+                        decoration: BoxDecoration(
+                          border: Border.all(color: AppTheme.darkBorder, width: 0.5),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Column(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                              decoration: BoxDecoration(
+                                color: Colors.amber.withOpacity(0.08),
+                                borderRadius: const BorderRadius.only(
+                                  topLeft: Radius.circular(6),
+                                  topRight: Radius.circular(6),
+                                ),
+                              ),
+                              child: const Row(
+                                children: [
+                                  Expanded(flex: 2, child: Text('Order ID', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: AppTheme.textPrimary))),
+                                  Expanded(flex: 2, child: Text('Truck No.', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: AppTheme.textPrimary))),
+                                  Expanded(flex: 2, child: Text('Capacity (kg)', textAlign: TextAlign.right, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: AppTheme.textPrimary))),
+                                  Expanded(flex: 2, child: Text('Used (kg)', textAlign: TextAlign.right, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: AppTheme.textPrimary))),
+                                  Expanded(flex: 3, child: Text('From', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: AppTheme.textPrimary))),
+                                  Expanded(flex: 3, child: Text('To', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: AppTheme.textPrimary))),
+                                  Expanded(flex: 2, child: Text('Util %', textAlign: TextAlign.right, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: AppTheme.textPrimary))),
+                                ],
+                              ),
+                            ),
+                            ConstrainedBox(
+                              constraints: BoxConstraints(
+                                maxHeight: MediaQuery.of(context).size.height * 0.25,
+                              ),
+                              child: ListView.builder(
+                                shrinkWrap: true,
+                                itemCount: lowUtilizationOrders.length,
+                                itemBuilder: (context, idx) {
+                                  final d = lowUtilizationOrders[idx];
+                                  final util = (d['utilization'] as double).toStringAsFixed(1);
+                                  return Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                    decoration: BoxDecoration(
+                                      border: Border(
+                                        bottom: BorderSide(color: AppTheme.darkBorder, width: 0.5),
+                                      ),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Expanded(flex: 2, child: Text(d['orderId'] as String, style: const TextStyle(fontSize: 11, color: AppTheme.textPrimary), overflow: TextOverflow.ellipsis)),
+                                        Expanded(flex: 2, child: Text(d['vehicleNumber'] as String, style: const TextStyle(fontSize: 11, color: AppTheme.textPrimary), overflow: TextOverflow.ellipsis)),
+                                        Expanded(flex: 2, child: Text('${d['capacityKg']}', textAlign: TextAlign.right, style: const TextStyle(fontSize: 11, color: AppTheme.textPrimary))),
+                                        Expanded(flex: 2, child: Text('${d['weightUsed']}', textAlign: TextAlign.right, style: const TextStyle(fontSize: 11, color: AppTheme.textPrimary))),
+                                        Expanded(flex: 3, child: Text(d['from'] as String, style: const TextStyle(fontSize: 11, color: AppTheme.textPrimary), overflow: TextOverflow.ellipsis)),
+                                        Expanded(flex: 3, child: Text(d['to'] as String, style: const TextStyle(fontSize: 11, color: AppTheme.textPrimary), overflow: TextOverflow.ellipsis)),
+                                        Expanded(
+                                          flex: 2,
+                                          child: Text(
+                                            '$util%',
+                                            textAlign: TextAlign.right,
+                                            style: const TextStyle(fontSize: 11, color: Colors.orange, fontWeight: FontWeight.w600),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ],

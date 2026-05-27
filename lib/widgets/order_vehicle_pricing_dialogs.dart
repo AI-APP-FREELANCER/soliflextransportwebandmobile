@@ -27,6 +27,8 @@ class OrderAdminSegmentPricingDialog extends StatefulWidget {
 class _OrderAdminSegmentPricingDialogState extends State<OrderAdminSegmentPricingDialog> {
   late final List<TextEditingController> _invoiceCtrls;
   late final List<TextEditingController> _tollCtrls;
+  late final List<TextEditingController> _otherChargesCtrls;
+  late final List<TextEditingController> _otherChargesDescCtrls;
 
   @override
   void initState() {
@@ -39,6 +41,13 @@ class _OrderAdminSegmentPricingDialogState extends State<OrderAdminSegmentPricin
       final v = s.tollCharges ?? 0;
       return TextEditingController(text: v.toString());
     }).toList();
+    _otherChargesCtrls = widget.order.tripSegments.map((s) {
+      final v = s.otherCharges ?? 0;
+      return TextEditingController(text: v.toString());
+    }).toList();
+    _otherChargesDescCtrls = widget.order.tripSegments.map((s) {
+      return TextEditingController(text: s.otherChargesDescription ?? '');
+    }).toList();
   }
 
   @override
@@ -47,6 +56,12 @@ class _OrderAdminSegmentPricingDialogState extends State<OrderAdminSegmentPricin
       c.dispose();
     }
     for (final c in _tollCtrls) {
+      c.dispose();
+    }
+    for (final c in _otherChargesCtrls) {
+      c.dispose();
+    }
+    for (final c in _otherChargesDescCtrls) {
       c.dispose();
     }
     super.dispose();
@@ -58,10 +73,14 @@ class _OrderAdminSegmentPricingDialogState extends State<OrderAdminSegmentPricin
       final seg = widget.order.tripSegments[i];
       final inv = int.tryParse(_invoiceCtrls[i].text.trim()) ?? 0;
       final toll = int.tryParse(_tollCtrls[i].text.trim()) ?? 0;
+      final other = int.tryParse(_otherChargesCtrls[i].text.trim()) ?? 0;
+      final otherDesc = _otherChargesDescCtrls[i].text.trim();
       segments.add({
         'segment_id': seg.segmentId,
         'invoice_amount': inv,
         'toll_charges': toll,
+        'other_charges': other,
+        'other_charges_description': otherDesc,
       });
     }
 
@@ -128,6 +147,29 @@ class _OrderAdminSegmentPricingDialogState extends State<OrderAdminSegmentPricin
                               labelText: 'Toll (₹)',
                             ),
                             keyboardType: TextInputType.number,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _otherChargesCtrls[i],
+                            decoration: const InputDecoration(
+                              labelText: 'Other Charges (₹)',
+                            ),
+                            keyboardType: TextInputType.number,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextField(
+                            controller: _otherChargesDescCtrls[i],
+                            decoration: const InputDecoration(
+                              labelText: 'Description',
+                            ),
                           ),
                         ),
                       ],

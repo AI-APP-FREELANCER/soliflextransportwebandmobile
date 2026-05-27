@@ -85,6 +85,7 @@ class OrderModel {
   final int? totalWeight; // Cumulative sum of all segment weights
   final int? totalInvoiceAmount; // Cumulative sum of all segment invoice amounts
   final int? totalTollCharges; // Cumulative sum of all segment toll charges
+  final int? totalOtherCharges; // Cumulative sum of all segment other charges
   final String? creatorDepartment; // Department of the user who created the order
   final String? creatorUserId; // ID of the user who created the order
   final String? creatorName; // Full name of the user who created the order
@@ -133,6 +134,7 @@ class OrderModel {
     this.totalWeight,
     this.totalInvoiceAmount,
     this.totalTollCharges,
+    this.totalOtherCharges,
     this.creatorDepartment,
     this.creatorUserId,
     this.creatorName,
@@ -235,6 +237,11 @@ class OrderModel {
               ? json['total_toll_charges']
               : int.tryParse(json['total_toll_charges'].toString()))
           : null,
+      totalOtherCharges: json['total_other_charges'] != null
+          ? (json['total_other_charges'] is int
+              ? json['total_other_charges']
+              : int.tryParse(json['total_other_charges'].toString()))
+          : null,
       creatorDepartment: json['creator_department']?.toString(),
       creatorUserId: json['creator_user_id']?.toString(),
       creatorName: json['creator_name']?.toString(),
@@ -318,6 +325,7 @@ class OrderModel {
       if (totalWeight != null) 'total_weight': totalWeight,
       if (totalInvoiceAmount != null) 'total_invoice_amount': totalInvoiceAmount,
       if (totalTollCharges != null) 'total_toll_charges': totalTollCharges,
+      if (totalOtherCharges != null) 'total_other_charges': totalOtherCharges,
       if (creatorDepartment != null) 'creator_department': creatorDepartment,
       if (creatorUserId != null) 'creator_user_id': creatorUserId,
       if (creatorName != null) 'creator_name': creatorName,
@@ -360,6 +368,11 @@ class OrderModel {
   int getTotalTollCharges() {
     if (totalTollCharges != null) return totalTollCharges!;
     return tripSegments.fold(0, (sum, segment) => sum + (segment.tollCharges ?? 0));
+  }
+
+  int getTotalOtherCharges() {
+    if (totalOtherCharges != null) return totalOtherCharges!;
+    return tripSegments.fold(0, (sum, segment) => sum + (segment.otherCharges ?? 0));
   }
 
   /// Parse amendment history from JSON string or array

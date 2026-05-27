@@ -1673,7 +1673,7 @@ class OrderDetailModal extends StatelessWidget {
                                   ),
                                 ),
                                 if (showFinancials &&
-                                    (segment.invoiceAmount != null || segment.tollCharges != null)) ...[
+                                    (segment.invoiceAmount != null || segment.tollCharges != null || (segment.otherCharges != null && (segment.otherCharges ?? 0) > 0))) ...[
                                   const SizedBox(height: 4),
                                   Row(
                                     children: [
@@ -1748,6 +1748,32 @@ class OrderDetailModal extends StatelessWidget {
                                       ],
                                     ],
                                   ),
+                                  if ((segment.otherCharges ?? 0) > 0) ...[
+                                    const SizedBox(height: 4),
+                                    Tooltip(
+                                      message: segment.otherChargesDescription?.isNotEmpty == true
+                                          ? segment.otherChargesDescription!
+                                          : 'Other charges',
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: Colors.purple.withOpacity(0.1),
+                                          borderRadius: BorderRadius.circular(4),
+                                          border: Border.all(color: Colors.purple, width: 1),
+                                        ),
+                                        child: Text(
+                                          segment.otherChargesDescription?.isNotEmpty == true
+                                              ? '${segment.otherChargesDescription}: ₹${segment.otherCharges}'
+                                              : 'Other: ₹${segment.otherCharges}',
+                                          style: const TextStyle(
+                                            fontSize: 10,
+                                            color: Colors.purple,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ],
                               ],
                             ),
@@ -1780,10 +1806,14 @@ class OrderDetailModal extends StatelessWidget {
                     children: [
                       _buildTotalRow('Total Weight', '${order.getTotalWeight()} kg', Icons.scale),
                       if (showFinancials) ...[
-                        const Divider(height: 12), // Reduced from 20
+                        const Divider(height: 12),
                         _buildTotalRow('Freight Charges', '₹${order.getTotalInvoiceAmount()}', Icons.attach_money, Colors.green),
-                        const Divider(height: 12), // Reduced from 20
+                        const Divider(height: 12),
                         _buildTotalRow('Total Toll', '₹${order.getTotalTollCharges()}', Icons.local_atm, Colors.blue),
+                        if (order.getTotalOtherCharges() > 0) ...[
+                          const Divider(height: 12),
+                          _buildTotalRow('Other Charges', '₹${order.getTotalOtherCharges()}', Icons.receipt_long, Colors.purple),
+                        ],
                       ],
                     ],
                   ),
