@@ -158,9 +158,25 @@ async function main() {
       );
     }
 
+    // rfqs.csv / orders.csv can reference vehicleIds that were later
+    // removed from vehicles.csv. vehicle_id is nullable and vehicle_number
+    // (free text) already carries the human-readable identifier, so unlike
+    // the user backfill above, dangling vehicle references are safely
+    // nulled out rather than fabricating placeholder vehicle rows (we have
+    // no real capacity/type data to invent for a deleted vehicle).
+    const validVehicleIds = new Set(vehicles.map((v) => parseInt(v.vehicleId, 10)).filter(Boolean));
+    function resolveVehicleId(rawId) {
+      if (!rawId) return null;
+      const id = parseInt(rawId, 10);
+      return validVehicleIds.has(id) ? id : null;
+    }
+    let nulledVehicleRefs = 0;
+
     // RFQs (preserve IDs)
     for (const r of rfqs) {
       if (!r.rfqId) continue;
+      const rfqVehicleId = resolveVehicleId(r.vehicleId);
+      if (r.vehicleId && rfqVehicleId === null) nulledVehicleRefs++;
       await client.query(
         `insert into rfqs (
            rfq_id, user_id, source, destination, material_weight, material_type,
@@ -191,7 +207,7 @@ async function main() {
           r.destination,
           parseInt(r.materialWeight || '0', 10) || 0,
           r.materialType,
-          r.vehicleId ? parseInt(r.vehicleId, 10) : null,
+          rfqVehicleId,
           r.vehicle_number || '',
           r.status,
           parseInt(r.totalCost || '0', 10) || 0,
@@ -213,6 +229,8 @@ async function main() {
     // Orders
     for (const o of orders) {
       if (!o.order_id) continue;
+      const orderVehicleId = resolveVehicleId(o.vehicle_id);
+      if (o.vehicle_id && orderVehicleId === null) nulledVehicleRefs++;
       await client.query(
         `insert into orders (
           order_id, user_id, source, destination, material_weight, material_type,
@@ -295,7 +313,7 @@ async function main() {
           parseInt(o.material_weight || '0', 10) || 0,
           o.material_type || '',
           o.trip_type || '',
-          o.vehicle_id ? parseInt(o.vehicle_id, 10) : null,
+          orderVehicleId,
           o.vehicle_number || '',
           o.order_status || '',
           o.created_at || null,
@@ -368,6 +386,11 @@ async function main() {
     }
 
     await client.query('commit');
+    if (nulledVehicleRefs > 0) {
+      console.log(
+        `Nulled ${nulledVehicleRefs} dangling vehicle_id reference(s) on rfqs/orders (vehicle since removed from vehicles.csv); vehicle_number text was preserved.`
+      );
+    }
     console.log('Seed completed from CSV files.');
   } catch (e) {
     await client.query('rollback');
