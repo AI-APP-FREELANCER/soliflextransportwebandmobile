@@ -259,8 +259,7 @@ async function main() {
           $35,$36,
           $37,$38,$39,
           $40,$41,
-          $42,$43,
-          $44,$45
+          $42,$43
         )
         on conflict (order_id) do update set
           user_id = excluded.user_id,
