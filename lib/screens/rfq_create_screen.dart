@@ -10,6 +10,7 @@ import '../services/api_service.dart';
 import '../models/vehicle_model.dart';
 import '../models/vendor_model.dart'; // CRITICAL FIX: Import VendorModel for type checking
 import '../theme/app_theme.dart';
+import '../widgets/searchable_location_dropdown.dart';
 
 class RFQCreateScreen extends StatefulWidget {
   const RFQCreateScreen({super.key});
@@ -1353,19 +1354,11 @@ class _RFQCreateScreenState extends State<RFQCreateScreen> {
               );
             }
 
-            return DropdownButtonFormField<String>(
-              decoration: const InputDecoration(
-                labelText: 'Starting Point *',
-                hintText: 'Select starting point',
-                prefixIcon: Icon(Icons.location_on),
-              ),
+            return SearchableLocationDropdown(
+              labelText: 'Starting Point *',
+              hintText: 'Select starting point',
               value: _selectedSource,
-              items: vendors.map((vendor) {
-                return DropdownMenuItem<String>(
-                  value: vendor.name,
-                  child: Text(vendor.name),
-                );
-              }).toList(),
+              items: vendors.map((vendor) => vendor.name).toList(),
               onChanged: (value) {
                 setState(() {
                   _selectedSource = value;
@@ -1387,23 +1380,15 @@ class _RFQCreateScreenState extends State<RFQCreateScreen> {
         Consumer<VendorProvider>(
           builder: (context, vendorProvider, child) {
             final vendors = vendorProvider.vendors;
-            return DropdownButtonFormField<String>(
-              decoration: InputDecoration(
-                labelText: _selectedTripType == 'Round-Trip-Vendor' 
-                    ? 'End Point *'
-                    : 'End Point *',
-                hintText: _selectedTripType == 'Round-Trip-Vendor'
-                    ? 'End point'
-                    : 'Select End point',
-                prefixIcon: const Icon(Icons.location_on),
-              ),
+            return SearchableLocationDropdown(
+              labelText: _selectedTripType == 'Round-Trip-Vendor'
+                  ? 'End Point *'
+                  : 'End Point *',
+              hintText: _selectedTripType == 'Round-Trip-Vendor'
+                  ? 'End point'
+                  : 'Select End point',
               value: _selectedDestination,
-              items: vendors.map((vendor) {
-                return DropdownMenuItem<String>(
-                  value: vendor.name,
-                  child: Text(vendor.name),
-                );
-              }).toList(),
+              items: vendors.map((vendor) => vendor.name).toList(),
               onChanged: (value) {
                 setState(() {
                   _selectedDestination = value;
@@ -1674,6 +1659,11 @@ class _RFQCreateScreenState extends State<RFQCreateScreen> {
 
   Widget _buildMultipleSegmentCard(int index, Map<String, dynamic> segment) {
     return Card(
+      // Identity-based key (not index): when a segment is deleted, the
+      // remaining cards shift position. Without this, Flutter would reuse
+      // the search field's internal controller/focus state at the shifted
+      // position, showing stale text for the wrong segment.
+      key: ObjectKey(segment),
       margin: const EdgeInsets.only(bottom: 16),
       elevation: 2,
       child: Padding(
@@ -1709,20 +1699,12 @@ class _RFQCreateScreenState extends State<RFQCreateScreen> {
             Consumer<VendorProvider>(
               builder: (context, vendorProvider, child) {
                 final vendors = vendorProvider.vendors;
-                return DropdownButtonFormField<String>(
-                  decoration: const InputDecoration(
-                    labelText: 'Starting Point *',
-                    prefixIcon: Icon(Icons.location_on),
-                  ),
-                  value: segment['source']?.toString().isEmpty == false 
+                return SearchableLocationDropdown(
+                  labelText: 'Starting Point *',
+                  value: segment['source']?.toString().isEmpty == false
                       ? segment['source']?.toString()
                       : null,
-                  items: vendors.map((vendor) {
-                    return DropdownMenuItem<String>(
-                      value: vendor.name,
-                      child: Text(vendor.name),
-                    );
-                  }).toList(),
+                  items: vendors.map((vendor) => vendor.name).toList(),
                   onChanged: (value) {
                     setState(() {
                       segment['source'] = value ?? '';
@@ -1767,20 +1749,12 @@ class _RFQCreateScreenState extends State<RFQCreateScreen> {
             Consumer<VendorProvider>(
               builder: (context, vendorProvider, child) {
                 final vendors = vendorProvider.vendors;
-                return DropdownButtonFormField<String>(
-                  decoration: const InputDecoration(
-                    labelText: 'End Point *',
-                    prefixIcon: Icon(Icons.location_on),
-                  ),
-                  value: segment['destination']?.toString().isEmpty == false 
+                return SearchableLocationDropdown(
+                  labelText: 'End Point *',
+                  value: segment['destination']?.toString().isEmpty == false
                       ? segment['destination']?.toString()
                       : null,
-                  items: vendors.map((vendor) {
-                    return DropdownMenuItem<String>(
-                      value: vendor.name,
-                      child: Text(vendor.name),
-                    );
-                  }).toList(),
+                  items: vendors.map((vendor) => vendor.name).toList(),
                   onChanged: (value) {
                     setState(() {
                       segment['destination'] = value ?? '';

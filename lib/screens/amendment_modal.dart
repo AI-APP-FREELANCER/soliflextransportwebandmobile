@@ -10,6 +10,7 @@ import '../services/order_workflow_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/order_edit_eligibility.dart';
 import '../widgets/order_vehicle_pricing_dialogs.dart';
+import '../widgets/searchable_location_dropdown.dart';
 
 class AmendmentModal extends StatefulWidget {
   final OrderModel order;
@@ -454,6 +455,11 @@ class _AmendmentModalState extends State<AmendmentModal> {
   ) {
 
     return Container(
+      // Identity-based key (not index): when a segment is deleted, the
+      // remaining forms shift position. Without this, Flutter would reuse
+      // the search field's internal controller/focus state at the shifted
+      // position, showing stale text for the wrong segment.
+      key: ObjectKey(segment),
       margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -534,19 +540,10 @@ class _AmendmentModalState extends State<AmendmentModal> {
                     ? currentSource 
                     : null;
 
-                return DropdownButtonFormField<String>(
+                return SearchableLocationDropdown(
                   value: sourceValue,
-                  decoration: const InputDecoration(
-                    labelText: 'Starting Point *',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.location_on),
-                  ),
-                  items: vendors.map((vendor) {
-                    return DropdownMenuItem<String>(
-                      value: vendor.name,
-                      child: Text(vendor.name),
-                    );
-                  }).toList(),
+                  labelText: 'Starting Point *',
+                  items: vendors.map((vendor) => vendor.name).toList(),
                   onChanged: (value) {
                     setState(() {
                       _newSegments[index]['source'] = value ?? '';
@@ -663,19 +660,10 @@ class _AmendmentModalState extends State<AmendmentModal> {
                   ? currentDestination 
                   : null;
 
-              return DropdownButtonFormField<String>(
+              return SearchableLocationDropdown(
                 value: destinationValue,
-                decoration: InputDecoration(
-                  labelText: _isRoundTrip() ? 'Additional Route (C) *' : 'End Point *',
-                  border: const OutlineInputBorder(),
-                  prefixIcon: const Icon(Icons.location_on),
-                ),
-                items: vendors.map((vendor) {
-                  return DropdownMenuItem<String>(
-                    value: vendor.name,
-                    child: Text(vendor.name),
-                  );
-                }).toList(),
+                labelText: _isRoundTrip() ? 'Additional Route (C) *' : 'End Point *',
+                items: vendors.map((vendor) => vendor.name).toList(),
                 onChanged: (value) {
                   setState(() {
                     _newSegments[index]['destination'] = value ?? '';
