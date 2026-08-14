@@ -53,8 +53,42 @@ async function main() {
         [parseInt(u.userId, 10), u.fullName, u.passwordHash, u.department, u.role]
       );
     }
-    if (users.length > 0) {
-      const maxId = Math.max(...users.map((u) => parseInt(u.userId || '0', 10)));
+
+    // orders.csv / rfqs.csv can reference userIds that were later deleted
+    // from backend.csv (CSV storage never enforced referential integrity).
+    // Backfill minimal placeholder rows for those ids so historical
+    // orders/rfqs keep their FK-required user reference and stay
+    // queryable, instead of failing the insert or losing the record.
+    const existingUserIds = new Set(users.map((u) => parseInt(u.userId, 10)).filter(Boolean));
+    const referencedUserIds = new Set();
+    for (const r of rfqs) {
+      if (r.userId) referencedUserIds.add(parseInt(r.userId, 10));
+    }
+    for (const o of orders) {
+      for (const field of [o.user_id, o.creator_user_id, o.last_amended_by_user_id]) {
+        if (field) referencedUserIds.add(parseInt(field, 10));
+      }
+    }
+    const missingUserIds = [...referencedUserIds].filter(
+      (id) => Number.isInteger(id) && id > 0 && !existingUserIds.has(id)
+    );
+    for (const id of missingUserIds) {
+      await client.query(
+        `insert into users (user_id, full_name, password_hash, department, role)
+         values ($1,$2,$3,$4,$5)
+         on conflict (user_id) do nothing`,
+        [id, `Former User (ID ${id})`, '', 'Unknown', 'RFQ_CREATOR']
+      );
+    }
+    if (missingUserIds.length > 0) {
+      console.log(
+        `Backfilled ${missingUserIds.length} placeholder user(s) referenced by historical orders/rfqs: ${missingUserIds.join(', ')}`
+      );
+    }
+
+    const allKnownIds = [...existingUserIds, ...missingUserIds];
+    if (allKnownIds.length > 0) {
+      const maxId = Math.max(...allKnownIds);
       await client.query(`select setval(pg_get_serial_sequence('users','user_id'), $1, true)`, [maxId]);
     }
 
