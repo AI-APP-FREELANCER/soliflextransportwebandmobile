@@ -29,7 +29,9 @@ async function readUsers() {
        from users
       order by user_id asc`
   );
-  return rows;
+  // CSV mode always returns userId as a string; keep that contract so
+  // frontend code parsing this as String doesn't break under Postgres.
+  return rows.map((r) => ({ ...r, userId: r.userId.toString() }));
 }
 
 async function writeUser(user) {
@@ -62,7 +64,7 @@ async function writeUser(user) {
                role`,
     [user.fullName, user.passwordHash, user.department, role]
   );
-  return rows[0];
+  return { ...rows[0], userId: rows[0].userId.toString() };
 }
 
 // Bulk replace, matching csvDatabaseService.writeAllUsers (used by
@@ -116,7 +118,8 @@ async function findUserByCredentials(fullName, department) {
       limit 1`,
     [fullName, department]
   );
-  return rows[0] || null;
+  if (!rows[0]) return null;
+  return { ...rows[0], userId: rows[0].userId.toString() };
 }
 
 async function getUserById(userId) {
@@ -131,7 +134,8 @@ async function getUserById(userId) {
       where user_id = $1`,
     [parseInt(userId, 10)]
   );
-  return rows[0] || null;
+  if (!rows[0]) return null;
+  return { ...rows[0], userId: rows[0].userId.toString() };
 }
 
 function getDepartments() {
@@ -153,7 +157,8 @@ async function getVendors() {
        from vendors
       order by vendor_id asc`
   );
-  return rows;
+  // CSV mode always returns vendorId as a string; keep that contract.
+  return rows.map((r) => ({ ...r, vendorId: r.vendorId.toString() }));
 }
 
 async function readVendorsWithPricing() {
@@ -172,7 +177,7 @@ async function readVendorsWithPricing() {
        from vendors
       order by vendor_id asc`
   );
-  return rows;
+  return rows.map((r) => ({ ...r, vendorId: r.vendorId.toString() }));
 }
 
 async function writeAllVendors(vendors) {
