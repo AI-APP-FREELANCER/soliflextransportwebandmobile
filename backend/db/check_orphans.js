@@ -39,6 +39,24 @@ async function main() {
   });
   console.log(`\norders.csv: ${orders.length} rows, ${orderIssues.length} with missing user reference`);
   orderIssues.forEach((o) => console.log(`  orphan order: order_id=${o.order_id} (${o._bad.join(', ')})`));
+
+  // orders.user_id / rfqs.userId are required (NOT NULL) columns. Find rows
+  // where the value is blank or not a valid integer -- these fail the
+  // Postgres insert differently (invalid input syntax) than the FK checks
+  // above. Report the full row plus creator_user_id as a possible fallback.
+  const isBlankOrNonNumeric = (v) => !v || !/^\d+$/.test(String(v).trim());
+
+  const badOrderUserIds = orders.filter((o) => isBlankOrNonNumeric(o.user_id));
+  console.log(`\norders.csv: ${badOrderUserIds.length} row(s) with blank/non-numeric user_id`);
+  badOrderUserIds.forEach((o) =>
+    console.log(
+      `  order_id=${o.order_id} user_id=${JSON.stringify(o.user_id)} creator_user_id=${JSON.stringify(o.creator_user_id)} creator_name=${JSON.stringify(o.creator_name)} created_at=${o.created_at}`
+    )
+  );
+
+  const badRfqUserIds = rfqs.filter((r) => isBlankOrNonNumeric(r.userId));
+  console.log(`\nrfqs.csv: ${badRfqUserIds.length} row(s) with blank/non-numeric userId`);
+  badRfqUserIds.forEach((r) => console.log('  rfq:', JSON.stringify(r)));
 }
 
 main().catch((err) => {
