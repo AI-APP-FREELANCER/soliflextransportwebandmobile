@@ -25,6 +25,11 @@ function buildPoolConfigFromEnv() {
     connectionTimeoutMillis: process.env.PGPOOL_CONN_TIMEOUT_MS
       ? parseInt(process.env.PGPOOL_CONN_TIMEOUT_MS, 10)
       : 10000,
+    // This Postgres database is shared with another app (accommodation),
+    // which owns the `public` schema. Every connection in this pool
+    // resolves unqualified table names into `transport_schema` first, so
+    // this app never reads or writes `public` tables, even by accident.
+    options: '-c search_path=transport_schema,public',
   };
 }
 

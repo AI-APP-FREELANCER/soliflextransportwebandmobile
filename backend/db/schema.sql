@@ -1,5 +1,13 @@
 -- Soliflex Transport: PostgreSQL schema (baseline)
 -- Run this against your database (DigitalOcean managed Postgres) once.
+--
+-- This database is shared with another application (accommodation app),
+-- which owns tables in the `public` schema. All transport tables live in
+-- `transport_schema` instead, and the connection's search_path (set in
+-- db/pool.js) resolves every unqualified table name below into it. This
+-- file must never reference or modify `public` schema objects.
+
+create schema if not exists transport_schema;
 
 create table if not exists users (
   user_id serial primary key,
