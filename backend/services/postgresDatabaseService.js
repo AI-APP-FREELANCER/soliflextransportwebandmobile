@@ -65,6 +65,43 @@ async function writeUser(user) {
   return rows[0];
 }
 
+// Bulk replace, matching csvDatabaseService.writeAllUsers (used by
+// adminRoutes for user update/delete: read all, mutate/filter in memory,
+// write the whole list back). Users removed from `users` (vs what's
+// currently in the table) are deleted; note that unlike the CSV version,
+// Postgres enforces the orders.user_id foreign key (ON DELETE RESTRICT),
+// so deleting a user who still has orders will correctly fail with a clear
+// error instead of silently leaving orphaned order references.
+async function writeAllUsers(users) {
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    await client.query('begin');
+    const incomingIds = users.map((u) => parseInt(u.userId, 10)).filter(Boolean);
+    if (incomingIds.length > 0) {
+      await client.query('delete from users where user_id <> all($1::int[])', [incomingIds]);
+    }
+    for (const u of users) {
+      await client.query(
+        `insert into users (user_id, full_name, password_hash, department, role)
+         values ($1,$2,$3,$4,$5)
+         on conflict (user_id) do update
+           set full_name = excluded.full_name,
+               password_hash = excluded.password_hash,
+               department = excluded.department,
+               role = excluded.role`,
+        [parseInt(u.userId, 10), u.fullName, u.passwordHash, u.department, u.role]
+      );
+    }
+    await client.query('commit');
+  } catch (e) {
+    await client.query('rollback');
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
 async function findUserByCredentials(fullName, department) {
   const pool = getPool();
   const { rows } = await pool.query(
@@ -889,7 +926,6 @@ const passthrough = [
   'parseTripSegments',
   'stringifyTripSegments',
   'calculateOrderCategory',
-  'calculateInvoiceRate',
   'getWeightBracket',
   'calculateOrderTotals',
   'isFactoryLocation',
@@ -906,10 +942,23 @@ for (const key of passthrough) {
   module.exports[key] = csvLogic[key];
 }
 
+// calculateInvoiceRate is intentionally NOT a blind passthrough: the CSV
+// implementation reads vendor pricing via its own internal
+// readVendorsWithPricing(), which is hardcoded to vendors.csv on disk. Under
+// Postgres mode that would silently price every order off stale CSV data
+// instead of the vendors table. Same pricing math (untouched), Postgres
+// vendor data supplied via the optional override parameter.
+async function calculateInvoiceRate(sourceLocation, materialWeight, destinationLocation = null, tripType = null) {
+  const vendors = await readVendorsWithPricing();
+  return csvLogic.calculateInvoiceRate(sourceLocation, materialWeight, destinationLocation, tripType, vendors);
+}
+module.exports.calculateInvoiceRate = calculateInvoiceRate;
+
 module.exports.ensureSchema = ensureSchema;
 module.exports.initializeCsvFile = initializeCsvFile;
 module.exports.readUsers = readUsers;
 module.exports.writeUser = writeUser;
+module.exports.writeAllUsers = writeAllUsers;
 module.exports.findUserByCredentials = findUserByCredentials;
 module.exports.getUserById = getUserById;
 module.exports.getDepartments = getDepartments;

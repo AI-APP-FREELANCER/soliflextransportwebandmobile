@@ -785,7 +785,7 @@ function invoiceAmountFromDropColumns(vendor, weightBracket) {
 
 // Calculate invoice rate based on source location and material weight
 // For Multiple Trip: Use calculateInvoiceRateForSegment() which checks both source and destination
-async function calculateInvoiceRate(sourceLocation, materialWeight, destinationLocation = null, tripType = null) {
+async function calculateInvoiceRate(sourceLocation, materialWeight, destinationLocation = null, tripType = null, vendorsOverride = null) {
   try {
     // Validate inputs
     if (!sourceLocation || sourceLocation.trim() === '') {
@@ -799,7 +799,7 @@ async function calculateInvoiceRate(sourceLocation, materialWeight, destinationL
     // USER REQUEST: For Multiple Trip, force Drop rates (forceDropRates = true)
     if (destinationLocation && destinationLocation.trim() !== '') {
       const forceDropRates = tripType === 'Multiple-Trip-Vendor';
-      return await calculateInvoiceRateForSegment(sourceLocation, destinationLocation, materialWeight, forceDropRates);
+      return await calculateInvoiceRateForSegment(sourceLocation, destinationLocation, materialWeight, forceDropRates, vendorsOverride);
     }
 
     // Normalize source location (trim, case-insensitive)
@@ -814,8 +814,8 @@ async function calculateInvoiceRate(sourceLocation, materialWeight, destinationL
     
     if (!isFactory) {
       // Read vendors with pricing data only if not a factory
-      const vendors = await readVendorsWithPricing();
-      
+      const vendors = vendorsOverride || await readVendorsWithPricing();
+
       // Find matching vendor (case-insensitive)
       vendor = vendors.find(v => 
         v.vendor_name.toLowerCase() === normalizedSource.toLowerCase()
@@ -830,8 +830,8 @@ async function calculateInvoiceRate(sourceLocation, materialWeight, destinationL
       // We'll use a dummy lookup - but actually, factories likely aren't in vendors.csv
       // So we'll need to handle this case: for factories, pricing might come from a different source
       // For now, let's check if factory is in vendors.csv as well
-      const vendors = await readVendorsWithPricing();
-      vendor = vendors.find(v => 
+      const vendors = vendorsOverride || await readVendorsWithPricing();
+      vendor = vendors.find(v =>
         v.vendor_name.toLowerCase() === normalizedSource.toLowerCase()
       );
       // If factory not in vendors.csv, we'll still use the pricing columns structure
@@ -902,7 +902,7 @@ async function calculateInvoiceRate(sourceLocation, materialWeight, destinationL
 // - Factory → Vendor or Vendor → Vendor: Apply Pick rates (pick_up_by_sol_*)
 // - Vendor → Factory: Apply Drop rates (dropped_by_vendor_*)
 // USER REQUEST: For Multiple Trip, ALWAYS use Drop rates (dropped_by_vendor_*) for all segments
-async function calculateInvoiceRateForSegment(sourceLocation, destinationLocation, materialWeight, forceDropRates = false) {
+async function calculateInvoiceRateForSegment(sourceLocation, destinationLocation, materialWeight, forceDropRates = false, vendorsOverride = null) {
   try {
     // Validate inputs
     if (!sourceLocation || sourceLocation.trim() === '') {
@@ -928,8 +928,8 @@ async function calculateInvoiceRateForSegment(sourceLocation, destinationLocatio
     );
 
     // Read vendors with pricing data
-    const vendors = await readVendorsWithPricing();
-    
+    const vendors = vendorsOverride || await readVendorsWithPricing();
+
     // CRITICAL FIX: Log rate card data status
     console.log(`[Rate Calculation] Rate card records count: ${vendors.length}`);
     console.log(`[Rate Calculation] Sample vendors: ${vendors.slice(0, 3).map(v => v.vendor_name).join(', ')}`);
