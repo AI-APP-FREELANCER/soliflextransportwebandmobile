@@ -87,6 +87,7 @@ async function main() {
     }
 
     const allKnownIds = [...existingUserIds, ...missingUserIds];
+    const allKnownUserIds = new Set(allKnownIds);
     if (allKnownIds.length > 0) {
       const maxId = Math.max(...allKnownIds);
       await client.query(`select setval(pg_get_serial_sequence('users','user_id'), $1, true)`, [maxId]);
@@ -353,8 +354,15 @@ async function main() {
     }
 
     // Notifications (preserve IDs)
+    let nulledNotificationUserRefs = 0;
     for (const n of notifications) {
-      if (!n.notification_id) continue;
+      const notificationId = parseInt(n.notification_id, 10);
+      if (!Number.isInteger(notificationId)) continue;
+      let relatedUserId = n.related_user_id ? parseInt(n.related_user_id, 10) : null;
+      if (relatedUserId !== null && !allKnownUserIds.has(relatedUserId)) {
+        relatedUserId = null;
+        nulledNotificationUserRefs++;
+      }
       await client.query(
         `insert into notifications (
            notification_id, order_id, recipient_department, notification_type, message, status, created_at, related_user_id
@@ -368,19 +376,25 @@ async function main() {
                created_at = excluded.created_at,
                related_user_id = excluded.related_user_id`,
         [
-          parseInt(n.notification_id, 10),
+          notificationId,
           n.order_id || '',
           n.recipient_department || '',
           n.notification_type || '',
           n.message || '',
           n.status || 'unread',
           n.created_at || null,
-          n.related_user_id ? parseInt(n.related_user_id, 10) : null,
+          relatedUserId,
         ]
       );
     }
-    if (notifications.length > 0) {
-      const maxId = Math.max(...notifications.map((n) => parseInt(n.notification_id || '0', 10)));
+    if (nulledNotificationUserRefs > 0) {
+      console.log(`Nulled ${nulledNotificationUserRefs} dangling notifications.related_user_id reference(s).`);
+    }
+    const validNotificationIds = notifications
+      .map((n) => parseInt(n.notification_id, 10))
+      .filter((id) => Number.isInteger(id));
+    if (validNotificationIds.length > 0) {
+      const maxId = Math.max(...validNotificationIds);
       await client.query(`select setval(pg_get_serial_sequence('notifications','notification_id'), $1, true)`, [maxId]);
     }
 

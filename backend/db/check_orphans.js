@@ -16,11 +16,38 @@ function readCsv(filePath) {
   });
 }
 
+function findConflictMarkers(filePath) {
+  if (!fs.existsSync(filePath)) return [];
+  const lines = fs.readFileSync(filePath, 'utf8').split('\n');
+  const hits = [];
+  lines.forEach((line, i) => {
+    if (/^(<<<<<<<|=======|>>>>>>>)/.test(line)) hits.push({ lineNo: i + 1, line: line.slice(0, 80) });
+  });
+  return hits;
+}
+
 async function main() {
   const dir = path.join(__dirname, '..');
+
+  // Unresolved git merge conflicts can end up baked into these tracked CSVs
+  // (as literally happened with orders.csv) since the live app also writes
+  // to them. Check every tracked CSV before anything else.
+  const trackedCsvs = ['backend.csv', 'vendors.csv', 'vehicles.csv', 'rfqs.csv', 'orders.csv', 'notifications.csv'];
+  let anyMarkers = false;
+  for (const name of trackedCsvs) {
+    const hits = findConflictMarkers(path.join(dir, name));
+    if (hits.length > 0) {
+      anyMarkers = true;
+      console.log(`CONFLICT MARKERS in ${name}:`);
+      hits.forEach((h) => console.log(`  line ${h.lineNo}: ${h.line}`));
+    }
+  }
+  console.log(anyMarkers ? '\n^ resolve the above before seeding.\n' : 'No conflict markers found in any tracked CSV.\n');
+
   const users = await readCsv(path.join(dir, 'backend.csv'));
   const rfqs = await readCsv(path.join(dir, 'rfqs.csv'));
   const orders = await readCsv(path.join(dir, 'orders.csv'));
+  const notifications = await readCsv(path.join(dir, 'notifications.csv'));
 
   const validUserIds = new Set(users.map((u) => u.userId).filter(Boolean));
   console.log(`backend.csv has ${users.length} users, ids: ${[...validUserIds].join(', ')}`);
@@ -57,6 +84,17 @@ async function main() {
   const badRfqUserIds = rfqs.filter((r) => isBlankOrNonNumeric(r.userId));
   console.log(`\nrfqs.csv: ${badRfqUserIds.length} row(s) with blank/non-numeric userId`);
   badRfqUserIds.forEach((r) => console.log('  rfq:', JSON.stringify(r)));
+
+  // notification_id is a required (NOT NULL) serial-backed int column too.
+  const badNotificationIds = notifications.filter((n) => isBlankOrNonNumeric(n.notification_id));
+  console.log(`\nnotifications.csv: ${notifications.length} rows, ${badNotificationIds.length} with blank/non-numeric notification_id`);
+  badNotificationIds.forEach((n) => console.log('  notification:', JSON.stringify(n)));
+
+  const badNotificationUserRefs = notifications.filter(
+    (n) => n.related_user_id && !validUserIds.has(n.related_user_id)
+  );
+  console.log(`notifications.csv: ${badNotificationUserRefs.length} row(s) with related_user_id not in backend.csv`);
+  badNotificationUserRefs.forEach((n) => console.log('  notification:', JSON.stringify(n)));
 }
 
 main().catch((err) => {
