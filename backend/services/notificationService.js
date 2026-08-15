@@ -198,11 +198,119 @@ async function notifyApprovedOrder(order) {
   return notifications;
 }
 
+/**
+ * Notify the next relevant department after a single checkpoint stage is
+ * approved (Security-Entry -> Stores-Verification -> Security-Exit,
+ * chaining across segments). Uses the same site-key location matching as
+ * the workflow permission check (csvService.extractLocationKey /
+ * departmentsForLocationKey) so notification targets and who's actually
+ * allowed to act on that checkpoint never drift apart. Silently no-ops if a
+ * location has no registered department (e.g. a factory unit with no
+ * registered Security/Stores staff yet) -- never throws, callers should
+ * treat this as best-effort and non-blocking for the underlying approval.
+ *
+ * @param order the order (for order_id / creator context)
+ * @param stage the stage that was just approved: 'SECURITY_ENTRY' | 'STORES_VERIFICATION' | 'SECURITY_EXIT'
+ * @param workflowStep the specific workflow step object that was approved (carries .location, .stage_index)
+ * @param segments the order's full trip_segments array
+ * @param segmentIndex index of the segment this stage belongs to, within `segments`
+ * @param isOrderCompleted whether this approval made the whole order COMPLETED
+ */
+async function notifyNextCheckpoint(order, stage, workflowStep, segments, segmentIndex, isOrderCompleted) {
+  const orderId = order.order_id || order.orderId;
+  const relatedUserId = order.creator_user_id || order.creatorUserId || '';
+  const location = workflowStep?.location || '';
+
+  const notifyDepartments = async (departments, notificationType, message) => {
+    const notifications = [];
+    for (const department of departments) {
+      notifications.push(await createNotification(orderId, department, notificationType, message, relatedUserId));
+    }
+    return notifications;
+  };
+
+  const securityAt = (loc) => {
+    const key = csvService.extractLocationKey(loc);
+    return csvService.departmentsForLocationKey(key).filter((d) => d.toLowerCase().includes('security'));
+  };
+  const storesAt = (loc) => {
+    const key = csvService.extractLocationKey(loc);
+    return csvService.departmentsForLocationKey(key, { includeFabric: true }).filter(
+      (d) => d.toLowerCase().includes('stores') || d.toLowerCase().includes('fabric')
+    );
+  };
+
+  if (stage === 'SECURITY_ENTRY') {
+    const depts = storesAt(location);
+    if (depts.length === 0) return [];
+    return notifyDepartments(depts, 'CHECKPOINT_STORES_VERIFICATION',
+      `Stores verification required at ${location}. Order ID: ${orderId}`);
+  }
+
+  if (stage === 'STORES_VERIFICATION') {
+    const depts = securityAt(location);
+    if (depts.length === 0) return [];
+    return notifyDepartments(depts, 'CHECKPOINT_SECURITY_EXIT',
+      `Security exit approval required at ${location}. Order ID: ${orderId}`);
+  }
+
+  if (stage === 'SECURITY_EXIT') {
+    const stageIndex = workflowStep?.stage_index;
+    // Origin-side exit (stage_index 2) hands off to this same segment's
+    // destination-side entry (stage_index 3).
+    if (stageIndex === 2) {
+      const destLocation = segments[segmentIndex]?.destination || '';
+      const depts = securityAt(destLocation);
+      if (depts.length === 0) return [];
+      return notifyDepartments(depts, 'CHECKPOINT_SECURITY_ENTRY',
+        `Vehicle en route, security entry required at ${destLocation}. Order ID: ${orderId}`);
+    }
+    // Destination-side exit (stage_index 5): either the order is now fully
+    // complete, or hand off to the next segment's origin-side entry.
+    if (isOrderCompleted) {
+      return notifyDepartments(['Accounts Team'], 'ORDER_COMPLETED',
+        `Order fully completed. Order ID: ${orderId}`);
+    }
+    if (segmentIndex + 1 < segments.length) {
+      const nextSource = segments[segmentIndex + 1]?.source || '';
+      const depts = securityAt(nextSource);
+      if (depts.length === 0) return [];
+      return notifyDepartments(depts, 'CHECKPOINT_SECURITY_ENTRY',
+        `Vehicle en route to next segment, security entry required at ${nextSource}. Order ID: ${orderId}`);
+    }
+  }
+
+  return [];
+}
+
+/**
+ * Notify Accounts Team, Admin, and the order's creator (via their
+ * department, since notifications are department-scoped in this system)
+ * when an order/checkpoint is rejected. No existing precedent for this in
+ * the codebase -- this is a new notification, not a fix to an existing one.
+ */
+async function notifyOrderRejected(order, workflowStep, comments) {
+  const orderId = order.order_id || order.orderId;
+  const relatedUserId = order.creator_user_id || order.creatorUserId || '';
+  const location = workflowStep?.location || '';
+  const recipients = new Set(['Accounts Team', 'Admin']);
+  if (order.creator_department) recipients.add(order.creator_department);
+
+  const message = `Order rejected${location ? ` at ${location}` : ''}. Reason: ${comments || 'Not provided'}. Order ID: ${orderId}`;
+  const notifications = [];
+  for (const department of recipients) {
+    notifications.push(await createNotification(orderId, department, 'ORDER_REJECTED', message, relatedUserId));
+  }
+  return notifications;
+}
+
 module.exports = {
   determineRecipientsForNewOrder,
   determineRecipientsForApprovedOrder,
   createNotification,
   notifyNewOrder,
-  notifyApprovedOrder
+  notifyApprovedOrder,
+  notifyNextCheckpoint,
+  notifyOrderRejected
 };
 

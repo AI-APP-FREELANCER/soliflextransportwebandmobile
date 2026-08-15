@@ -122,6 +122,7 @@ class OrderProvider with ChangeNotifier {
     required String orderId,
     required List<Map<String, dynamic>> newSegments,
     required String userId, // Add userId for audit trail
+    List<Map<String, dynamic>>? existingSegmentEdits, // Weight corrections to already-placed segments
   }) async {
     _isLoading = true;
     _error = null;
@@ -132,6 +133,7 @@ class OrderProvider with ChangeNotifier {
         orderId: orderId,
         newSegments: newSegments,
         userId: userId, // Pass userId for audit trail
+        existingSegmentEdits: existingSegmentEdits,
       );
 
       if (result['success'] == true) {

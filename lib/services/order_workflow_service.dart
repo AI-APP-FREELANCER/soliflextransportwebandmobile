@@ -22,6 +22,18 @@ const storesDepartments = [
   'Fabric Unit-IV/ Soliflex unit-II'
 ];
 
+// Dart port of the backend's csvDatabaseService.extractLocationKey -- keep
+// these two in sync. Normalizes a factory location string ("IAF unit-1") or
+// a registered department string ("IAF Unit-1 Security") to the same key
+// ("iaf-1"), or null for anything that doesn't match (vendor names,
+// unregistered units, Purchase/Accounts Team/Admin/Maintenance).
+String? _extractLocationKey(String? value) {
+  if (value == null || value.trim().isEmpty) return null;
+  final match = RegExp(r'(IAF|Soliflex)\s*unit[-\s]?(\d+)', caseSensitive: false).firstMatch(value);
+  if (match == null) return null;
+  return '${match.group(1)!.toLowerCase()}-${match.group(2)}';
+}
+
 class OrderWorkflowService {
   final ApiService _apiService = ApiService();
   
@@ -86,7 +98,7 @@ class OrderWorkflowService {
 
   // Check if user can perform action (client-side role check)
   // CRITICAL FIX: Add explicit logging, flexible department matching, and Admin/Account privileged override
-  bool canPerformAction(String userDepartment, String userRole, String stage, String action) {
+  bool canPerformAction(String userDepartment, String userRole, String stage, String action, {String? location}) {
     // CRITICAL FIX: Log all inputs for debugging
     print('[canPerformAction] ========================================');
     print('[canPerformAction] Checking permissions:');
@@ -207,15 +219,23 @@ class OrderWorkflowService {
 
     print('  [Role Check] isSecurityRole: $isSecurityRole, isStoresRole: $isStoresRole');
 
+    // Additive, backward-compatible: only applied when a caller passes
+    // `location` (mirrors the backend's location-scoped permission check).
+    // Callers that don't pass it keep the exact prior behavior.
+    final locationMatches = location == null || _extractLocationKey(userDepartment) == _extractLocationKey(location);
+    if (location != null) {
+      print('  [Location Check] userDept key: ${_extractLocationKey(userDepartment)}, stage location key: ${_extractLocationKey(location)}, matches: $locationMatches');
+    }
+
     if (isStoresStage) {
       // Only Stores/Fabric can interact with Verification stage
-      final result = isStoresRole;
-      print('  [STORES_VERIFICATION] Result: $result (isStoresRole: $isStoresRole)');
+      final result = isStoresRole && locationMatches;
+      print('  [STORES_VERIFICATION] Result: $result (isStoresRole: $isStoresRole, locationMatches: $locationMatches)');
       return result;
     } else {
       // Only Security can interact with Entry/Exit stages
-      final result = isSecurityRole;
-      print('  [SECURITY_ENTRY/EXIT] Result: $result (isSecurityRole: $isSecurityRole)');
+      final result = isSecurityRole && locationMatches;
+      print('  [SECURITY_ENTRY/EXIT] Result: $result (isSecurityRole: $isSecurityRole, locationMatches: $locationMatches)');
       print('[canPerformAction] ========================================');
       return result;
     }

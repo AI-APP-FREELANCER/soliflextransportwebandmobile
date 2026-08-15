@@ -14,6 +14,8 @@ class TripSegment {
   final String? otherChargesDescription;
   final bool? isManualInvoice; // Flag to indicate if invoice/toll was manually overridden
   final List<WorkflowStep> workflow; // Workflow steps for this segment
+  final int? originalMaterialWeight; // Weight as first placed, only set once this segment has been weight-amended
+  final bool weightAmended; // True once this segment's weight has been corrected via amendment
 
   TripSegment({
     required this.segmentId,
@@ -28,6 +30,8 @@ class TripSegment {
     this.otherChargesDescription,
     this.isManualInvoice,
     List<WorkflowStep>? workflow,
+    this.originalMaterialWeight,
+    this.weightAmended = false,
   }) : workflow = workflow ?? [];
 
   factory TripSegment.fromJson(Map<String, dynamic> json) {
@@ -104,6 +108,14 @@ class TripSegment {
               : json['is_manual_invoice'].toString().toLowerCase() == 'yes')
           : false,
       workflow: workflowSteps,
+      // Absent on segments that have never been weight-amended -- both
+      // parse to their defaults (null / false) rather than failing.
+      originalMaterialWeight: json['original_material_weight'] != null
+          ? (json['original_material_weight'] is int
+              ? json['original_material_weight']
+              : int.tryParse(json['original_material_weight'].toString()))
+          : null,
+      weightAmended: json['weight_amended'] == true || json['weight_amended']?.toString().toLowerCase() == 'true',
     );
   }
 
@@ -121,6 +133,8 @@ class TripSegment {
       if (otherChargesDescription != null) 'other_charges_description': otherChargesDescription,
       'is_manual_invoice': (isManualInvoice ?? false) ? 'Yes' : 'No',
       'workflow': workflow.map((w) => w.toJson()).toList(),
+      if (originalMaterialWeight != null) 'original_material_weight': originalMaterialWeight,
+      if (weightAmended) 'weight_amended': weightAmended,
     };
   }
 

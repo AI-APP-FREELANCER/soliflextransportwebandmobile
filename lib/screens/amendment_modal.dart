@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/order_model.dart';
+import '../models/trip_segment_model.dart';
 import '../models/vehicle_model.dart';
 import '../providers/auth_provider.dart';
 import '../providers/vendor_provider.dart';
@@ -14,7 +15,7 @@ import '../widgets/searchable_location_dropdown.dart';
 
 class AmendmentModal extends StatefulWidget {
   final OrderModel order;
-  final Function(List<Map<String, dynamic>>) onAmend;
+  final Function(List<Map<String, dynamic>> newSegments, List<Map<String, dynamic>> existingSegmentEdits) onAmend;
 
   const AmendmentModal({
     super.key,
@@ -37,7 +38,23 @@ class _AmendmentModalState extends State<AmendmentModal> {
   int? _finalReturnSegmentInvoice;
   int? _finalReturnSegmentToll;
   bool _isCalculatingReturnInvoice = false;
-  
+
+  // Weight-amendment state for already-placed segments: which segment's
+  // weight field is currently expanded for editing, the controller for
+  // each expanded field, and the pending edited weight (only present once
+  // it actually differs from the segment's current weight).
+  final Set<int> _weightEditExpanded = {};
+  final Map<int, TextEditingController> _weightEditControllers = {};
+  final Map<int, int> _weightEdits = {};
+
+  @override
+  void dispose() {
+    for (final controller in _weightEditControllers.values) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
   @override
   void initState() {
     super.initState();
@@ -156,7 +173,8 @@ class _AmendmentModalState extends State<AmendmentModal> {
                     },
                   ),
 
-                  // Existing Segments (Read-only)
+                  // Existing Segments -- weight is editable (tap the pencil),
+                  // everything else stays read-only in this list.
                   const Text(
                     'Existing Trip Segments',
                     style: TextStyle(
@@ -173,42 +191,9 @@ class _AmendmentModalState extends State<AmendmentModal> {
                     ),
                     child: Column(
                       children: _liveOrder.tripSegments.map((segment) {
-                        return Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.grey.shade50,
-                            border: segment != _liveOrder.tripSegments.last
-                                ? Border(bottom: BorderSide(color: Colors.grey.shade200))
-                                : null,
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Segment #${segment.segmentId}: ${segment.source} → ${segment.destination}',
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                '${segment.materialWeight} kg',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.grey.shade600,
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                'Type: ${segment.materialTypeList.join(", ")}',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.grey.shade600,
-                                ),
-                              ),
-                            ],
-                          ),
+                        return _buildExistingSegmentTile(
+                          segment,
+                          isLast: segment == _liveOrder.tripSegments.last,
                         );
                       }).toList(),
                     ),
@@ -303,7 +288,10 @@ class _AmendmentModalState extends State<AmendmentModal> {
                                 segment['toll_charges'] = int.tryParse(segment['_toll_string'].toString()) ?? segment['toll_charges'];
                               }
                             }
-                            widget.onAmend(_newSegments);
+                            final existingSegmentEdits = _weightEdits.entries
+                                .map((e) => {'segment_id': e.key, 'material_weight': e.value})
+                                .toList();
+                            widget.onAmend(_newSegments, existingSegmentEdits);
                           }
                         },
                         style: ElevatedButton.styleFrom(
@@ -447,6 +435,112 @@ class _AmendmentModalState extends State<AmendmentModal> {
         }
       }
     }
+  }
+
+  Widget _buildExistingSegmentTile(TripSegment segment, {required bool isLast}) {
+    final segmentId = segment.segmentId;
+    final isExpanded = _weightEditExpanded.contains(segmentId);
+    final pendingWeight = _weightEdits[segmentId];
+    final displayWeight = pendingWeight ?? segment.materialWeight;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade50,
+        border: !isLast ? Border(bottom: BorderSide(color: Colors.grey.shade200)) : null,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Segment #${segment.segmentId}: ${segment.source} → ${segment.destination}',
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 4),
+          if (!isExpanded) ...[
+            Row(
+              children: [
+                Text(
+                  pendingWeight != null
+                      ? '${segment.materialWeight} kg → $pendingWeight kg'
+                      : '$displayWeight kg',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: pendingWeight != null ? FontWeight.w600 : FontWeight.normal,
+                    color: pendingWeight != null ? AppTheme.primaryOrange : Colors.grey.shade600,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                InkWell(
+                  onTap: () {
+                    setState(() {
+                      _weightEditControllers.putIfAbsent(
+                        segmentId,
+                        () => TextEditingController(text: displayWeight.toString()),
+                      );
+                      _weightEditExpanded.add(segmentId);
+                    });
+                  },
+                  child: Icon(Icons.edit, size: 14, color: Colors.grey.shade600),
+                ),
+              ],
+            ),
+          ] else ...[
+            Row(
+              children: [
+                Expanded(
+                  child: TextFormField(
+                    controller: _weightEditControllers[segmentId],
+                    keyboardType: TextInputType.number,
+                    style: const TextStyle(fontSize: 12),
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      labelText: 'Material Weight (kg)',
+                      contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                InkWell(
+                  onTap: () {
+                    setState(() {
+                      final newWeight = int.tryParse(_weightEditControllers[segmentId]?.text ?? '');
+                      if (newWeight != null && newWeight > 0 && newWeight != segment.materialWeight) {
+                        _weightEdits[segmentId] = newWeight;
+                      } else {
+                        _weightEdits.remove(segmentId);
+                      }
+                      _weightEditExpanded.remove(segmentId);
+                    });
+                  },
+                  child: const Icon(Icons.check, size: 18, color: Colors.green),
+                ),
+                const SizedBox(width: 4),
+                InkWell(
+                  onTap: () {
+                    setState(() {
+                      _weightEditExpanded.remove(segmentId);
+                    });
+                  },
+                  child: const Icon(Icons.close, size: 18, color: Colors.grey),
+                ),
+              ],
+            ),
+          ],
+          const SizedBox(height: 2),
+          Text(
+            'Type: ${segment.materialTypeList.join(", ")}',
+            style: TextStyle(
+              fontSize: 11,
+              color: Colors.grey.shade600,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildSegmentForm(

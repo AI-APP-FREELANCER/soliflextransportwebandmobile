@@ -107,7 +107,16 @@ class _OrdersDashboardScreenState extends State<OrdersDashboardScreen> {
 
   // Helper to get approval workflow status
   String _getApprovalWorkflowStatus(OrderModel order) {
-    if (order.orderStatus == 'Open') {
+    // Normalize terminal statuses first -- the backend's workflow
+    // status-sync writes ALL CAPS ('COMPLETED'/'REJECTED'/'CANCELED').
+    final normalizedStatus = order.orderStatus.trim().toUpperCase();
+    if (normalizedStatus == 'COMPLETED') {
+      return 'Completed';
+    } else if (normalizedStatus == 'REJECTED') {
+      return 'Rejected';
+    } else if (normalizedStatus == 'CANCELLED' || normalizedStatus == 'CANCELED') {
+      return 'Cancelled';
+    } else if (order.orderStatus == 'Open') {
       return 'Pending Approval';
     } else if (order.orderStatus == 'In-Progress') {
       return 'Approved - In Progress';
@@ -126,10 +135,6 @@ class _OrdersDashboardScreenState extends State<OrdersDashboardScreen> {
         }
       }
       return 'En-Route';
-    } else if (order.orderStatus == 'Completed') {
-      return 'Completed';
-    } else if (order.orderStatus == 'Cancelled') {
-      return 'Cancelled';
     }
     return order.orderStatus;
   }
@@ -137,18 +142,22 @@ class _OrdersDashboardScreenState extends State<OrdersDashboardScreen> {
   // Helper to get flow status
   String _getFlowStatus(OrderModel order) {
     final effectiveStatus = _workflowService.getEffectiveOrderStatus(order);
+    // getEffectiveOrderStatus only derives REJECTED/COMPLETED from workflow
+    // step checks -- it doesn't know about the separate CANCEL action, which
+    // writes order_status = 'CANCELED' directly. Normalize that here too.
+    final normalizedOrderStatus = order.orderStatus.trim().toUpperCase();
     if (effectiveStatus == 'REJECTED') {
       return 'Rejected';
     } else if (effectiveStatus == 'COMPLETED') {
       return 'Completed';
+    } else if (normalizedOrderStatus == 'CANCELLED' || normalizedOrderStatus == 'CANCELED') {
+      return 'Cancelled';
     } else if (order.orderStatus == 'Open') {
       return 'Bid Selected';
     } else if (order.orderStatus == 'In-Progress') {
       return 'Approved';
     } else if (order.orderStatus == 'En-Route') {
       return 'In Transit';
-    } else if (order.orderStatus == 'Cancelled') {
-      return 'Cancelled';
     }
     return order.orderStatus;
   }
@@ -320,6 +329,12 @@ class _OrdersDashboardScreenState extends State<OrdersDashboardScreen> {
   }
 
   Color _getStatusColor(String status) {
+    // Normalize terminal statuses first: the backend's workflow status-sync
+    // writes ALL CAPS ('COMPLETED'/'REJECTED'/'CANCELED'), separate from the
+    // title-case 'Open'/'In-Progress'/'En-Route' active statuses below.
+    final normalized = status.trim().toUpperCase();
+    if (normalized == 'COMPLETED') return Colors.grey;
+    if (normalized == 'REJECTED' || normalized == 'CANCELLED' || normalized == 'CANCELED') return Colors.red;
     switch (status) {
       case 'Open':
         return Colors.green;
@@ -327,18 +342,16 @@ class _OrdersDashboardScreenState extends State<OrdersDashboardScreen> {
         return Colors.blue;
       case 'En-Route':
         return Colors.orange;
-      case 'Completed':
-        return Colors.grey;
-      case 'Cancelled':
-        return Colors.red;
-      case 'REJECTED':
-        return Colors.red;
       default:
         return Colors.grey;
     }
   }
 
   String _getStatusDisplay(String status) {
+    final normalized = status.trim().toUpperCase();
+    if (normalized == 'COMPLETED') return 'Completed';
+    if (normalized == 'REJECTED') return 'Rejected';
+    if (normalized == 'CANCELLED' || normalized == 'CANCELED') return 'Cancelled';
     switch (status) {
       case 'Open':
         return 'Open';
@@ -346,12 +359,6 @@ class _OrdersDashboardScreenState extends State<OrdersDashboardScreen> {
         return 'In Progress';
       case 'En-Route':
         return 'En Route';
-      case 'Completed':
-        return 'Completed';
-      case 'Cancelled':
-        return 'Cancelled';
-      case 'REJECTED':
-        return 'REJECTED';
       default:
         return status;
     }
@@ -964,7 +971,9 @@ class _OrdersDashboardScreenState extends State<OrdersDashboardScreen> {
                       Icon(Icons.scale, size: 9, color: AppTheme.textSecondary),
                       const SizedBox(width: 2),
                       Text(
-                        '${totalWeight} kg',
+                        order.originalTotalWeight != null && order.originalTotalWeight != totalWeight
+                            ? '${totalWeight} kg (was ${order.originalTotalWeight} kg)'
+                            : '${totalWeight} kg',
                         style: const TextStyle(
                           fontSize: 9,
                           color: AppTheme.textPrimary,
@@ -1123,6 +1132,12 @@ class OrderDetailModal extends StatelessWidget {
   });
 
   Color _getStatusColor(String status) {
+    // Normalize terminal statuses first: the backend's workflow status-sync
+    // writes ALL CAPS ('COMPLETED'/'REJECTED'/'CANCELED'), separate from the
+    // title-case 'Open'/'In-Progress'/'En-Route' active statuses below.
+    final normalized = status.trim().toUpperCase();
+    if (normalized == 'COMPLETED') return Colors.grey;
+    if (normalized == 'REJECTED' || normalized == 'CANCELLED' || normalized == 'CANCELED') return Colors.red;
     switch (status) {
       case 'Open':
         return Colors.green;
@@ -1130,18 +1145,16 @@ class OrderDetailModal extends StatelessWidget {
         return Colors.blue;
       case 'En-Route':
         return Colors.orange;
-      case 'Completed':
-        return Colors.grey;
-      case 'Cancelled':
-        return Colors.red;
-      case 'REJECTED':
-        return Colors.red;
       default:
         return Colors.grey;
     }
   }
 
   String _getStatusDisplay(String status) {
+    final normalized = status.trim().toUpperCase();
+    if (normalized == 'COMPLETED') return 'Completed';
+    if (normalized == 'REJECTED') return 'Rejected';
+    if (normalized == 'CANCELLED' || normalized == 'CANCELED') return 'Cancelled';
     switch (status) {
       case 'Open':
         return 'Open';
@@ -1149,12 +1162,6 @@ class OrderDetailModal extends StatelessWidget {
         return 'In Progress';
       case 'En-Route':
         return 'En Route';
-      case 'Completed':
-        return 'Completed';
-      case 'Cancelled':
-        return 'Cancelled';
-      case 'REJECTED':
-        return 'REJECTED';
       default:
         return status;
     }
@@ -1223,7 +1230,7 @@ class OrderDetailModal extends StatelessWidget {
       context: detailContext,
       builder: (dialogContext) => AmendmentModal(
         order: order,
-        onAmend: (newSegments) async {
+        onAmend: (newSegments, existingSegmentEdits) async {
           if (user == null) {
             ScaffoldMessenger.of(detailContext).showSnackBar(
               const SnackBar(
@@ -1233,12 +1240,13 @@ class OrderDetailModal extends StatelessWidget {
             );
             return;
           }
-          
+
           final orderProvider = Provider.of<OrderProvider>(detailContext, listen: false);
           final result = await orderProvider.amendOrder(
             orderId: order.orderId,
             newSegments: newSegments,
             userId: user.userId, // Pass userId for audit trail
+            existingSegmentEdits: existingSegmentEdits,
           );
           
           if (detailContext.mounted) {
@@ -1657,12 +1665,37 @@ class OrderDetailModal extends StatelessWidget {
                             Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(
-                                  'Material: ${segment.materialWeight} kg',
-                                  style: const TextStyle(
-                                    fontSize: 11,
-                                    color: AppTheme.textSecondary,
-                                  ),
+                                Row(
+                                  children: [
+                                    Text(
+                                      segment.weightAmended
+                                          ? 'Material: ${segment.originalMaterialWeight} kg → ${segment.materialWeight} kg'
+                                          : 'Material: ${segment.materialWeight} kg',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: segment.weightAmended ? FontWeight.w600 : FontWeight.normal,
+                                        color: segment.weightAmended ? AppTheme.primaryOrange : AppTheme.textSecondary,
+                                      ),
+                                    ),
+                                    if (segment.weightAmended) ...[
+                                      const SizedBox(width: 6),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                        decoration: BoxDecoration(
+                                          color: AppTheme.primaryOrange.withOpacity(0.15),
+                                          borderRadius: BorderRadius.circular(4),
+                                        ),
+                                        child: const Text(
+                                          'Amended',
+                                          style: TextStyle(
+                                            fontSize: 9,
+                                            fontWeight: FontWeight.w600,
+                                            color: AppTheme.primaryOrange,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ],
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
@@ -2157,6 +2190,34 @@ class OrderDetailModal extends StatelessWidget {
                       ),
                     ),
                   ],
+                ),
+              );
+            }).toList(),
+          ],
+          // Structured before/after for any existing-segment weight edits in
+          // this amendment, alongside the free-text change log above.
+          if (amendment.weightAmendments.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            const Text(
+              'Weight corrections:',
+              style: TextStyle(
+                fontWeight: FontWeight.w600,
+                color: AppTheme.textSecondary,
+                fontSize: 12,
+              ),
+            ),
+            const SizedBox(height: 4),
+            ...amendment.weightAmendments.map((w) {
+              return Padding(
+                padding: const EdgeInsets.only(left: 8, top: 2),
+                child: Text(
+                  'Segment #${w.segmentId} (${w.source} → ${w.destination}): '
+                  '${w.weightBefore} kg → ${w.weightAfter} kg'
+                  '${w.invoiceBefore != w.invoiceAfter ? '  (₹${w.invoiceBefore} → ₹${w.invoiceAfter})' : ''}',
+                  style: const TextStyle(
+                    color: AppTheme.primaryOrange,
+                    fontSize: 12,
+                  ),
                 ),
               );
             }).toList(),

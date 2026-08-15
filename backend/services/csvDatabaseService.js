@@ -644,9 +644,36 @@ function isFactoryLocation(location) {
   }
   // Normalize location name (trim whitespace, case-insensitive)
   const normalizedLocation = location.trim();
-  return FACTORY_LOCATIONS.some(factory => 
+  return FACTORY_LOCATIONS.some(factory =>
     factory.toLowerCase() === normalizedLocation.toLowerCase()
   );
+}
+
+// Extracts a normalized "site key" like "iaf-1" / "soliflex-3" from either a
+// factory location string (e.g. "IAF unit-1") or a registered department
+// string (e.g. "IAF Unit-1 Security"), so the two can be compared directly.
+// Returns null for anything that doesn't match (vendor names, unregistered
+// units, Purchase/Accounts Team/Admin/Maintenance) -- this is intentional:
+// those cases should never match a location-scoped permission check.
+function extractLocationKey(value) {
+  if (!value || typeof value !== 'string') return null;
+  const m = value.match(/(IAF|Soliflex)\s*unit[-\s]?(\d+)/i);
+  if (!m) return null;
+  return `${m[1].toLowerCase()}-${m[2]}`;
+}
+
+// Given a site key (from extractLocationKey), return the real registered
+// department names (from DEPARTMENTS) that cover Security/Stores/Fabric
+// duties at that site. Used both for location-scoped approval checks and
+// for notification targeting, so both stay in sync with the same source of
+// truth instead of drifting into separately-maintained lists.
+function departmentsForLocationKey(key, { includeFabric = true } = {}) {
+  if (!key) return [];
+  return DEPARTMENTS.filter((d) => {
+    if (extractLocationKey(d) !== key) return false;
+    const lower = d.toLowerCase();
+    return lower.includes('security') || lower.includes('stores') || (includeFabric && lower.includes('fabric'));
+  });
 }
 
 // Calculate order category based on trip segments
@@ -1433,6 +1460,18 @@ async function getOrderById(orderId) {
   return orders.find(o => o.order_id === orderId) || null;
 }
 
+// CSV mode has no per-row locking concept, so this is a plain pass-through
+// (read, mutate, write) -- it exists purely so callers can use the same
+// interface as postgresDatabaseService.js's row-locked version without an
+// if/else on DATA_STORE. Does not change getOrderById/writeOrder themselves.
+async function withOrderTransaction(orderId, mutateFn) {
+  const order = await getOrderById(orderId);
+  if (!order) return null;
+  const mutatedOrder = await mutateFn(order);
+  if (!mutatedOrder) return null;
+  return writeOrder(mutatedOrder);
+}
+
 // Update order status
 async function updateOrderStatus(orderId, newStatus, updateData = {}) {
   const orders = await readOrders();
@@ -1673,7 +1712,7 @@ function initializeSegmentWorkflow(segment, location) {
 }
 
 // Check if user can perform workflow action
-function canPerformWorkflowAction(userDepartment, userRole, stage, action) {
+function canPerformWorkflowAction(userDepartment, userRole, stage, action, location) {
   // CRITICAL FIX: SUPER_USER absolute override - can perform ANY action on ANY stage
   if (userRole === 'SUPER_USER') {
     console.log(`[canPerformWorkflowAction] SUPER_USER override - allowing ${action} on ${stage}`);
@@ -1707,16 +1746,25 @@ function canPerformWorkflowAction(userDepartment, userRole, stage, action) {
            normalizedDepartment === 'accounts team' || normalizedDepartment.includes('accounts');
   }
 
+  // Location-scoped check: a department can only act on a checkpoint at ITS
+  // OWN registered location. extractLocationKey returns null for anything
+  // that isn't a real registered factory site (vendor names, unregistered
+  // units), so this naturally denies in exactly those cases -- same as
+  // today's always-false result for non-admin users on every location.
   const isStoresStage = stage === 'STORES_VERIFICATION';
-  const isSecurityRole = SECURITY_DEPARTMENTS.includes(userDepartment);
-  const isStoresRole = STORES_DEPARTMENTS.includes(userDepartment);
+  const userLocationKey = extractLocationKey(userDepartment);
+  const stageLocationKey = extractLocationKey(location);
+  const locationMatches = userLocationKey !== null && userLocationKey === stageLocationKey;
+  const departmentLower = normalizedDepartment;
 
   if (isStoresStage) {
-    // Only Stores/Fabric can interact with Verification stage
-    return isStoresRole;
+    // Stores AND Fabric departments can verify at their own location.
+    const isStoresRole = departmentLower.includes('stores') || departmentLower.includes('fabric');
+    return locationMatches && isStoresRole;
   } else {
-    // Only Security can interact with Entry/Exit stages
-    return isSecurityRole;
+    // Only Security can interact with Entry/Exit stages, at their own location.
+    const isSecurityRole = departmentLower.includes('security');
+    return locationMatches && isSecurityRole;
   }
 }
 
@@ -2121,6 +2169,7 @@ module.exports = {
   getNextOrderId,
   updateOrderStatus,
   getOrderById,
+  withOrderTransaction,
   migrateRFQsToOrders,
   parseTripSegments,
   stringifyTripSegments,
@@ -2132,6 +2181,8 @@ module.exports = {
   calculateOrderTotals,
   // Factory location helper
   isFactoryLocation,
+  extractLocationKey,
+  departmentsForLocationKey,
   // Workflow functions
   initializeSegmentWorkflow,
   canPerformWorkflowAction,

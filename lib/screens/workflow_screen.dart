@@ -744,6 +744,7 @@ class _WorkflowScreenState extends State<WorkflowScreen> {
       userRole,
       stage,
       'APPROVE', // Check for approve action
+      location: location ?? workflowStep.location,
     );
 
     final isStageActive = _workflowService.isStageActive(

@@ -540,9 +540,9 @@ async function updateRFQStatus(rfqId, status, extraFields = {}) {
 // -----------------------
 // Orders (core persistence)
 // -----------------------
-async function readOrders() {
-  const pool = getPool();
-  const { rows } = await pool.query(
+async function readOrders(executor) {
+  const db = executor || getPool();
+  const { rows } = await db.query(
     `select order_id as "order_id",
             user_id as "user_id",
             source,
@@ -614,17 +614,34 @@ async function getNextOrderId() {
   return `Order-${maxNum + 1}`;
 }
 
-async function getOrderById(orderId) {
-  const pool = getPool();
-  const { rows } = await pool.query(`select * from orders where order_id = $1`, [orderId]);
+async function getOrderById(orderId, executor) {
+  const db = executor || getPool();
+  const { rows } = await db.query(`select * from orders where order_id = $1`, [orderId]);
   if (rows.length === 0) return null;
-  // Return in same shape as readOrders row mapper
-  const all = await readOrders();
+  // Return in same shape as readOrders row mapper. Uses the same executor
+  // (pool or an in-flight transaction client) so a read-back immediately
+  // after a write inside a transaction sees that write, not stale data.
+  const all = await readOrders(executor);
   return all.find((o) => o.order_id === orderId) || null;
 }
 
-async function writeOrder(order) {
-  const pool = getPool();
+// Row-locks the order for the duration of the caller's transaction. `client`
+// must be a checked-out client with an open transaction (not the pool) --
+// SELECT ... FOR UPDATE only has meaning inside a transaction.
+async function getOrderByIdForUpdate(orderId, client) {
+  const { rows } = await client.query(`select order_id from orders where order_id = $1 for update`, [orderId]);
+  if (rows.length === 0) return null;
+  return getOrderById(orderId, client);
+}
+
+// `executor` lets a caller pass an in-flight transaction client (from
+// withOrderTransaction) so this write happens inside their transaction and
+// under their row lock, instead of a fresh unlocked pool connection. Named
+// `pool` below (not `db`) purely so the existing pool.query(...) call sites
+// in this function didn't need to be touched -- Pool and PoolClient both
+// expose the same .query() method.
+async function writeOrder(order, executor) {
+  const pool = executor || getPool();
 
   // Keep CSV defaults/derivations using shared logic
   if (typeof order.trip_segments === 'object' || Array.isArray(order.trip_segments)) {
@@ -818,7 +835,42 @@ async function writeOrder(order) {
     );
   }
 
-  return getOrderById(order.order_id);
+  return getOrderById(order.order_id, executor);
+}
+
+// Locks the order row for the duration of mutateFn, so two near-simultaneous
+// requests touching the SAME order (e.g. two checkpoint approvals close
+// together) serialize instead of racing: the second request's read waits
+// for the first's transaction to commit, so it never overwrites the first's
+// change with a stale snapshot. mutateFn receives the locked order and
+// should return the order to persist, or a falsy value to abort with no
+// write (e.g. a validation failure discovered after the lock is held).
+async function withOrderTransaction(orderId, mutateFn) {
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    await client.query('begin');
+    const order = await getOrderByIdForUpdate(orderId, client);
+    if (!order) {
+      await client.query('rollback');
+      return null;
+    }
+    const mutatedOrder = await mutateFn(order);
+    if (!mutatedOrder) {
+      await client.query('rollback');
+      return null;
+    }
+    const written = await writeOrder(mutatedOrder, client);
+    await client.query('commit');
+    return written;
+  } catch (err) {
+    try {
+      await client.query('rollback');
+    } catch (_) {}
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 async function updateOrderStatus(orderId, status, extraFields = {}) {
@@ -934,6 +986,8 @@ const passthrough = [
   'getWeightBracket',
   'calculateOrderTotals',
   'isFactoryLocation',
+  'extractLocationKey',
+  'departmentsForLocationKey',
   'initializeSegmentWorkflow',
   'canPerformWorkflowAction',
   'isStageActive',
@@ -987,6 +1041,7 @@ module.exports.getNextOrderId = getNextOrderId;
 module.exports.writeOrder = writeOrder;
 module.exports.updateOrderStatus = updateOrderStatus;
 module.exports.getOrderById = getOrderById;
+module.exports.withOrderTransaction = withOrderTransaction;
 module.exports.getISTTimestamp = getISTTimestamp;
 module.exports.readNotifications = readNotifications;
 module.exports.writeNotification = writeNotification;

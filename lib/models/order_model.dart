@@ -2,6 +2,53 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'trip_segment_model.dart';
 
+/// A single existing segment's weight (and resulting invoice/toll) change
+/// captured by one amendment. Mirrors the backend's amendment_history
+/// weightAmendments entries 1:1.
+class SegmentWeightChange {
+  final int segmentId;
+  final String source;
+  final String destination;
+  final int weightBefore;
+  final int weightAfter;
+  final int invoiceBefore;
+  final int invoiceAfter;
+  final int tollBefore;
+  final int tollAfter;
+
+  SegmentWeightChange({
+    required this.segmentId,
+    required this.source,
+    required this.destination,
+    required this.weightBefore,
+    required this.weightAfter,
+    required this.invoiceBefore,
+    required this.invoiceAfter,
+    required this.tollBefore,
+    required this.tollAfter,
+  });
+
+  static int _intOf(dynamic v) {
+    if (v == null) return 0;
+    if (v is int) return v;
+    return int.tryParse(v.toString()) ?? 0;
+  }
+
+  factory SegmentWeightChange.fromJson(Map<String, dynamic> json) {
+    return SegmentWeightChange(
+      segmentId: _intOf(json['segmentId']),
+      source: json['source']?.toString() ?? '',
+      destination: json['destination']?.toString() ?? '',
+      weightBefore: _intOf(json['weightBefore']),
+      weightAfter: _intOf(json['weightAfter']),
+      invoiceBefore: _intOf(json['invoiceBefore']),
+      invoiceAfter: _intOf(json['invoiceAfter']),
+      tollBefore: _intOf(json['tollBefore']),
+      tollAfter: _intOf(json['tollAfter']),
+    );
+  }
+}
+
 /// Represents a single entry in the amendment history
 class AmendmentHistoryEntry {
   final String version; // e.g., "V1", "V2"
@@ -16,6 +63,7 @@ class AmendmentHistoryEntry {
   final int totalWeightAfter;
   final int totalInvoiceBefore;
   final int totalInvoiceAfter;
+  final List<SegmentWeightChange> weightAmendments;
 
   AmendmentHistoryEntry({
     required this.version,
@@ -30,12 +78,13 @@ class AmendmentHistoryEntry {
     required this.totalWeightAfter,
     required this.totalInvoiceBefore,
     required this.totalInvoiceAfter,
+    this.weightAmendments = const [],
   });
 
   factory AmendmentHistoryEntry.fromJson(Map<String, dynamic> json) {
     return AmendmentHistoryEntry(
       version: json['version']?.toString() ?? '',
-      timestamp: json['timestamp'] != null 
+      timestamp: json['timestamp'] != null
           ? DateTime.tryParse(json['timestamp'].toString()) ?? DateTime.now()
           : DateTime.now(),
       amendedBy: json['amendedBy']?.toString() ?? 'Unknown',
@@ -44,24 +93,32 @@ class AmendmentHistoryEntry {
       changeLog: json['changeLog'] != null && json['changeLog'] is List
           ? (json['changeLog'] as List).map((e) => e.toString()).toList()
           : [],
-      segmentsBefore: json['segmentsBefore'] != null 
+      segmentsBefore: json['segmentsBefore'] != null
           ? (json['segmentsBefore'] is int ? json['segmentsBefore'] : int.tryParse(json['segmentsBefore'].toString()) ?? 0)
           : 0,
-      segmentsAfter: json['segmentsAfter'] != null 
+      segmentsAfter: json['segmentsAfter'] != null
           ? (json['segmentsAfter'] is int ? json['segmentsAfter'] : int.tryParse(json['segmentsAfter'].toString()) ?? 0)
           : 0,
-      totalWeightBefore: json['totalWeightBefore'] != null 
+      totalWeightBefore: json['totalWeightBefore'] != null
           ? (json['totalWeightBefore'] is int ? json['totalWeightBefore'] : int.tryParse(json['totalWeightBefore'].toString()) ?? 0)
           : 0,
-      totalWeightAfter: json['totalWeightAfter'] != null 
+      totalWeightAfter: json['totalWeightAfter'] != null
           ? (json['totalWeightAfter'] is int ? json['totalWeightAfter'] : int.tryParse(json['totalWeightAfter'].toString()) ?? 0)
           : 0,
-      totalInvoiceBefore: json['totalInvoiceBefore'] != null 
+      totalInvoiceBefore: json['totalInvoiceBefore'] != null
           ? (json['totalInvoiceBefore'] is int ? json['totalInvoiceBefore'] : int.tryParse(json['totalInvoiceBefore'].toString()) ?? 0)
           : 0,
-      totalInvoiceAfter: json['totalInvoiceAfter'] != null 
+      totalInvoiceAfter: json['totalInvoiceAfter'] != null
           ? (json['totalInvoiceAfter'] is int ? json['totalInvoiceAfter'] : int.tryParse(json['totalInvoiceAfter'].toString()) ?? 0)
           : 0,
+      // Absent on amendment history entries created before this feature --
+      // parses to an empty list rather than failing.
+      weightAmendments: json['weightAmendments'] != null && json['weightAmendments'] is List
+          ? (json['weightAmendments'] as List)
+              .whereType<Map>()
+              .map((e) => SegmentWeightChange.fromJson(Map<String, dynamic>.from(e)))
+              .toList()
+          : const [],
     );
   }
 }
@@ -419,6 +476,15 @@ class OrderModel {
   }
 
   String get statusDisplay {
+    // The backend's workflow status-sync writes terminal statuses in
+    // ALL CAPS ('COMPLETED'/'REJECTED'/'CANCELED'), while order creation
+    // writes 'Open' and a legacy path writes title-case 'Completed'/
+    // 'Cancelled'. Normalize the terminal statuses up front so this always
+    // shows correctly regardless of which write path produced them.
+    final normalized = orderStatus.trim().toUpperCase();
+    if (normalized == 'COMPLETED') return 'Completed';
+    if (normalized == 'REJECTED') return 'Rejected';
+    if (normalized == 'CANCELLED' || normalized == 'CANCELED') return 'Cancelled';
     switch (orderStatus) {
       case 'Open':
         return 'Open';
@@ -426,16 +492,15 @@ class OrderModel {
         return 'In Progress';
       case 'En-Route':
         return 'En Route';
-      case 'Completed':
-        return 'Completed';
-      case 'Cancelled':
-        return 'Cancelled';
       default:
         return orderStatus;
     }
   }
 
   Color get statusColor {
+    final normalized = orderStatus.trim().toUpperCase();
+    if (normalized == 'COMPLETED') return Colors.grey;
+    if (normalized == 'REJECTED' || normalized == 'CANCELLED' || normalized == 'CANCELED') return Colors.red;
     switch (orderStatus) {
       case 'Open':
         return Colors.green;
@@ -443,10 +508,6 @@ class OrderModel {
         return Colors.blue;
       case 'En-Route':
         return Colors.orange;
-      case 'Completed':
-        return Colors.grey;
-      case 'Cancelled':
-        return Colors.red;
       default:
         return Colors.grey;
     }

@@ -602,6 +602,7 @@ class ApiService {
     required String orderId,
     required List<Map<String, dynamic>> newSegments,
     required String userId, // Add userId for audit trail
+    List<Map<String, dynamic>>? existingSegmentEdits, // Weight corrections to already-placed segments
   }) async {
     try {
       final response = await http.post(
@@ -611,6 +612,8 @@ class ApiService {
           'orderId': orderId,
           'newSegments': newSegments,
           'userId': userId, // Include userId for audit trail
+          if (existingSegmentEdits != null && existingSegmentEdits.isNotEmpty)
+            'existingSegmentEdits': existingSegmentEdits,
         }),
       );
 
