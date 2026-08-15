@@ -461,32 +461,47 @@ class _AmendmentModalState extends State<AmendmentModal> {
           ),
           const SizedBox(height: 4),
           if (!isExpanded) ...[
-            Row(
-              children: [
-                Text(
-                  pendingWeight != null
-                      ? '${segment.materialWeight} kg → $pendingWeight kg'
-                      : '$displayWeight kg',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: pendingWeight != null ? FontWeight.w600 : FontWeight.normal,
-                    color: pendingWeight != null ? AppTheme.primaryOrange : Colors.grey.shade600,
-                  ),
+            InkWell(
+              borderRadius: BorderRadius.circular(4),
+              onTap: () {
+                setState(() {
+                  _weightEditControllers.putIfAbsent(
+                    segmentId,
+                    () => TextEditingController(text: displayWeight.toString()),
+                  );
+                  _weightEditExpanded.add(segmentId);
+                });
+              },
+              child: Padding(
+                // Enlarges the tap target well beyond the icon's own bounds
+                // (a bare 14px icon with no padding is easy to miss).
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Row(
+                  children: [
+                    Text(
+                      pendingWeight != null
+                          ? '${segment.materialWeight} kg → $pendingWeight kg'
+                          : '$displayWeight kg',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: pendingWeight != null ? FontWeight.w600 : FontWeight.normal,
+                        color: pendingWeight != null ? AppTheme.primaryOrange : Colors.grey.shade600,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Icon(Icons.edit, size: 14, color: Colors.grey.shade600),
+                    const SizedBox(width: 4),
+                    Text(
+                      'Edit',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.grey.shade600,
+                        decoration: TextDecoration.underline,
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 6),
-                InkWell(
-                  onTap: () {
-                    setState(() {
-                      _weightEditControllers.putIfAbsent(
-                        segmentId,
-                        () => TextEditingController(text: displayWeight.toString()),
-                      );
-                      _weightEditExpanded.add(segmentId);
-                    });
-                  },
-                  child: Icon(Icons.edit, size: 14, color: Colors.grey.shade600),
-                ),
-              ],
+              ),
             ),
           ] else ...[
             Row(
@@ -503,8 +518,9 @@ class _AmendmentModalState extends State<AmendmentModal> {
                     ),
                   ),
                 ),
-                const SizedBox(width: 6),
+                const SizedBox(width: 4),
                 InkWell(
+                  borderRadius: BorderRadius.circular(16),
                   onTap: () {
                     setState(() {
                       final newWeight = int.tryParse(_weightEditControllers[segmentId]?.text ?? '');
@@ -516,16 +532,22 @@ class _AmendmentModalState extends State<AmendmentModal> {
                       _weightEditExpanded.remove(segmentId);
                     });
                   },
-                  child: const Icon(Icons.check, size: 18, color: Colors.green),
+                  child: const Padding(
+                    padding: EdgeInsets.all(8),
+                    child: Icon(Icons.check, size: 18, color: Colors.green),
+                  ),
                 ),
-                const SizedBox(width: 4),
                 InkWell(
+                  borderRadius: BorderRadius.circular(16),
                   onTap: () {
                     setState(() {
                       _weightEditExpanded.remove(segmentId);
                     });
                   },
-                  child: const Icon(Icons.close, size: 18, color: Colors.grey),
+                  child: const Padding(
+                    padding: EdgeInsets.all(8),
+                    child: Icon(Icons.close, size: 18, color: Colors.grey),
+                  ),
                 ),
               ],
             ),
