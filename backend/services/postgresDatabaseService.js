@@ -254,19 +254,35 @@ async function getVehicles(filterBusy = null) {
   return vehicles;
 }
 
+// Upsert-with-prune, matching writeAllUsers: only rows removed from the
+// incoming list are deleted, so vehicles still referenced by orders (FK
+// orders_vehicle_id_fkey) are never touched by a blanket delete when
+// creating/updating some other vehicle. Deleting a vehicle that still has
+// orders correctly fails with a clear FK error instead of being silently
+// skipped.
 async function writeAllVehicles(vehicles) {
   const pool = getPool();
   const client = await pool.connect();
   try {
     await client.query('begin');
-    await client.query('delete from vehicles');
+    const incomingIds = vehicles.map((v) => parseInt(v.vehicleId || v.vehicle_id, 10)).filter(Boolean);
+    if (incomingIds.length > 0) {
+      await client.query('delete from vehicles where vehicle_id <> all($1::int[])', [incomingIds]);
+    }
     for (const v of vehicles) {
       await client.query(
         `insert into vehicles (
            vehicle_id, vehicle_number, type, capacity_kg, vehicle_type, vendor_vehicle, status
-         ) values ($1,$2,$3,$4,$5,$6,$7)`,
+         ) values ($1,$2,$3,$4,$5,$6,$7)
+         on conflict (vehicle_id) do update
+           set vehicle_number = excluded.vehicle_number,
+               type = excluded.type,
+               capacity_kg = excluded.capacity_kg,
+               vehicle_type = excluded.vehicle_type,
+               vendor_vehicle = excluded.vendor_vehicle,
+               status = excluded.status`,
         [
-          parseInt(v.vehicleId || v.vehicle_id || 0, 10) || null,
+          parseInt(v.vehicleId || v.vehicle_id, 10),
           v.vehicle_number,
           v.type || '',
           parseInt(v.capacity_kg, 10) || 0,
