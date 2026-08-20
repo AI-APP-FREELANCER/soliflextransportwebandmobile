@@ -229,7 +229,7 @@ router.post('/admin/vendors', async (req, res) => {
     const vendors = await csvService.readVendorsWithPricing();
     
     // Find next S/L number
-    const maxSl = Math.max(...vendors.map(v => parseInt(v.vendor_name ? 0 : 0)), 0);
+    const maxSl = Math.max(...vendors.map(v => parseInt(v.vendorId, 10) || 0), 0);
     const newSl = maxSl + 1;
 
     // Create new vendor
@@ -247,6 +247,7 @@ router.post('/admin/vendors', async (req, res) => {
     };
 
     vendors.push({
+      vendorId: newSl.toString(),
       vendor_name: vendor_name,
       kl: kl || '',
       pick_up_by_sol_below_3000_kgs: pick_up_by_sol_below_3000_kgs || '0',
