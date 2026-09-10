@@ -710,7 +710,7 @@ class _OrdersDashboardScreenState extends State<OrdersDashboardScreen> {
         onTap: () => _showOrderDetailModal(order),
         borderRadius: BorderRadius.circular(6),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 6.0),
+          padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 9.0),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -770,7 +770,7 @@ class _OrdersDashboardScreenState extends State<OrdersDashboardScreen> {
                 ],
               ),
               
-              const SizedBox(height: 2),
+              const SizedBox(height: 5),
               
               // Line 2: Member Name | Department Name
               Row(
@@ -803,7 +803,7 @@ class _OrdersDashboardScreenState extends State<OrdersDashboardScreen> {
                 ],
               ),
               
-              const SizedBox(height: 2),
+              const SizedBox(height: 5),
               
               // Line 3: Vehicle Number | Vehicle Type | Capacity %
               Row(
@@ -876,7 +876,7 @@ class _OrdersDashboardScreenState extends State<OrdersDashboardScreen> {
                 ],
               ),
               
-              const SizedBox(height: 2),
+              const SizedBox(height: 5),
               
               // Line 4: Route: Starting Point → End Point
               Row(
@@ -898,7 +898,7 @@ class _OrdersDashboardScreenState extends State<OrdersDashboardScreen> {
                 ],
               ),
               
-              const SizedBox(height: 2),
+              const SizedBox(height: 5),
               
               // Line 4: Current Segment Status | Flow Status
               Row(
@@ -938,7 +938,7 @@ class _OrdersDashboardScreenState extends State<OrdersDashboardScreen> {
                 ],
               ),
               
-              const SizedBox(height: 2),
+              const SizedBox(height: 5),
               
               // Line 5: Approval Workflow Status
               Row(
@@ -960,7 +960,7 @@ class _OrdersDashboardScreenState extends State<OrdersDashboardScreen> {
                 ],
               ),
               
-              const SizedBox(height: 2),
+              const SizedBox(height: 5),
               
               // Line 6: Total Weight | Total Invoice | Total Toll
               Row(
@@ -1021,7 +1021,7 @@ class _OrdersDashboardScreenState extends State<OrdersDashboardScreen> {
                 ],
               ),
               
-              const SizedBox(height: 2),
+              const SizedBox(height: 5),
               
               // Line 7: Trip Type | Creator User ID
               Row(
@@ -1060,7 +1060,7 @@ class _OrdersDashboardScreenState extends State<OrdersDashboardScreen> {
                 ],
               ),
               
-              const SizedBox(height: 2),
+              const SizedBox(height: 5),
               
               // Footer: Creation Time | Order Category
               Row(
@@ -1698,7 +1698,7 @@ class OrderDetailModal extends StatelessWidget {
                                     ],
                                   ],
                                 ),
-                                const SizedBox(height: 2),
+                                const SizedBox(height: 5),
                                 Text(
                                   'Type: ${segment.materialTypeList.join(", ")}',
                                   style: const TextStyle(

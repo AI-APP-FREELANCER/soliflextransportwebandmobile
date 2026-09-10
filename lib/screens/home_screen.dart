@@ -1024,19 +1024,28 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
             // (date range, or a future search filter), one row per order.
             // Unlike the sections below, this always matches "Total Orders".
             _buildAllOrdersTable(context, filteredOrders),
-            const SizedBox(height: 16),
+            _buildSectionDivider(),
             // Utilization Analysis Table
             _buildUtilizationAnalysisTable(context, filteredOrders),
             if (showFinancialBreakdown) ...[
-              const SizedBox(height: 16),
+              _buildSectionDivider(),
               _buildFinancialBreakdownTable(context, filteredOrders),
             ],
-            const SizedBox(height: 16),
+            _buildSectionDivider(),
             // Operational Insights
             _buildOperationalInsights(context, filteredOrders),
           ],
         ),
       ),
+    );
+  }
+
+  // Clear visual break between two dashboard tables/sections -- a plain
+  // gap alone made it hard to tell where one table ended and the next began.
+  Widget _buildSectionDivider() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 20),
+      child: Divider(height: 1, thickness: 1, color: AppTheme.darkBorder),
     );
   }
 
@@ -1118,56 +1127,90 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
         ),
         const SizedBox(height: 8),
         Container(
-          constraints: const BoxConstraints(maxHeight: 260),
           decoration: BoxDecoration(
-            color: AppTheme.darkSurface,
-            borderRadius: BorderRadius.circular(6),
             border: Border.all(color: AppTheme.darkBorder, width: 0.5),
+            borderRadius: BorderRadius.circular(6),
           ),
-          child: ListView.separated(
-            shrinkWrap: true,
-            itemCount: orders.length,
-            separatorBuilder: (context, index) => Divider(height: 1, color: AppTheme.darkBorder),
-            itemBuilder: (context, index) {
-              final order = orders[index];
-              return Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                child: Row(
+          child: Column(
+            children: [
+              // Header -- fixed-width leading/trailing columns (their
+              // content length is bounded) with Route as the one column
+              // that actually grows, instead of every column stretching
+              // across the full card width and leaving large empty gaps.
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryOrange.withOpacity(0.1),
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(6),
+                    topRight: Radius.circular(6),
+                  ),
+                ),
+                child: const Row(
                   children: [
-                    Expanded(
-                      flex: 2,
-                      child: Text(
-                        order.orderId,
-                        style: const TextStyle(color: AppTheme.textPrimary, fontSize: 12, fontWeight: FontWeight.w600),
-                      ),
-                    ),
-                    Expanded(
-                      flex: 2,
-                      child: Text(
-                        order.effectiveDate != null ? _formatDate(order.effectiveDate!) : 'N/A',
-                        style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-                      ),
-                    ),
-                    Expanded(
-                      flex: 3,
-                      child: Text(
-                        '${order.source} → ${order.destination}',
-                        style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    Expanded(
-                      flex: 2,
-                      child: Text(
-                        order.orderStatus,
-                        textAlign: TextAlign.end,
-                        style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-                      ),
-                    ),
+                    SizedBox(width: 90, child: Text('Order ID', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppTheme.textPrimary))),
+                    SizedBox(width: 12),
+                    SizedBox(width: 90, child: Text('Date', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppTheme.textPrimary))),
+                    SizedBox(width: 12),
+                    Expanded(child: Text('Route', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppTheme.textPrimary))),
+                    SizedBox(width: 12),
+                    SizedBox(width: 100, child: Text('Status', textAlign: TextAlign.right, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppTheme.textPrimary))),
                   ],
                 ),
-              );
-            },
+              ),
+              Container(
+                constraints: const BoxConstraints(maxHeight: 260),
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: orders.length,
+                  separatorBuilder: (context, index) => Divider(height: 1, color: AppTheme.darkBorder),
+                  itemBuilder: (context, index) {
+                    final order = orders[index];
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      child: Row(
+                        children: [
+                          SizedBox(
+                            width: 90,
+                            child: Text(
+                              order.orderId,
+                              style: const TextStyle(color: AppTheme.textPrimary, fontSize: 12, fontWeight: FontWeight.w600),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          SizedBox(
+                            width: 90,
+                            child: Text(
+                              order.effectiveDate != null ? _formatDate(order.effectiveDate!) : 'N/A',
+                              style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              '${order.source} → ${order.destination}',
+                              style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          SizedBox(
+                            width: 100,
+                            child: Text(
+                              order.orderStatus,
+                              textAlign: TextAlign.right,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
           ),
         ),
       ],
