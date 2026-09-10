@@ -1202,6 +1202,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
           if (utilization >= 80 && utilization <= 100) {
             utilizationData.add({
               'orderId': order.orderId,
+              'date': order.effectiveDate,
               'vehicle': order.vehicleNumber ?? 'N/A',
               'weight': totalWeight,
               'capacity': vehicle.capacityKg,
@@ -1262,9 +1263,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
             TextButton.icon(
               onPressed: () {
                 final rows = <List<dynamic>>[
-                  ['Order ID', 'Vehicle', 'Weight (kg)', 'Capacity (kg)', 'Utilization %'],
+                  ['Order ID', 'Date', 'Vehicle', 'Weight (kg)', 'Capacity (kg)', 'Utilization %'],
                   ...utilizationData.map((d) => [
                         d['orderId'],
+                        d['date'] != null ? _formatDate(d['date'] as DateTime) : 'N/A',
                         d['vehicle'],
                         d['weight'],
                         d['capacity'],
@@ -1307,6 +1309,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
                       flex: 2,
                       child: Text(
                         'Order ID',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                          color: AppTheme.textPrimary,
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      flex: 2,
+                      child: Text(
+                        'Date',
                         style: const TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 12,
@@ -1395,6 +1408,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
                                 color: AppTheme.textPrimary,
                               ),
                               overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          Expanded(
+                            flex: 2,
+                            child: Text(
+                              data['date'] != null ? _formatDate(data['date'] as DateTime) : 'N/A',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: AppTheme.textSecondary,
+                              ),
                             ),
                           ),
                           Expanded(
@@ -1754,6 +1777,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
             final lastSeg = order.tripSegments.isNotEmpty ? order.tripSegments.last : null;
             lowUtilizationOrders.add({
               'orderId': order.orderId,
+              'date': order.effectiveDate,
               'vehicleNumber': order.vehicleNumber ?? 'N/A',
               'capacityKg': vehicle.capacityKg,
               'weightUsed': weightUsed,
@@ -1883,9 +1907,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
                       TextButton.icon(
                         onPressed: () {
                           final rows = <List<dynamic>>[
-                            ['Order ID', 'Truck Number', 'Capacity (kg)', 'Weight Used (kg)', 'From', 'To', 'Utilization %'],
+                            ['Order ID', 'Date', 'Truck Number', 'Capacity (kg)', 'Weight Used (kg)', 'From', 'To', 'Utilization %'],
                             ...lowUtilizationOrders.map((d) => [
                                   d['orderId'],
+                                  d['date'] != null ? _formatDate(d['date'] as DateTime) : 'N/A',
                                   d['vehicleNumber'],
                                   d['capacityKg'],
                                   d['weightUsed'],
@@ -1955,6 +1980,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
                               child: const Row(
                                 children: [
                                   Expanded(flex: 2, child: Text('Order ID', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: AppTheme.textPrimary))),
+                                  Expanded(flex: 2, child: Text('Date', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: AppTheme.textPrimary))),
                                   Expanded(flex: 2, child: Text('Truck No.', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: AppTheme.textPrimary))),
                                   Expanded(flex: 2, child: Text('Capacity (kg)', textAlign: TextAlign.right, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: AppTheme.textPrimary))),
                                   Expanded(flex: 2, child: Text('Used (kg)', textAlign: TextAlign.right, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: AppTheme.textPrimary))),
@@ -1984,6 +2010,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
                                     child: Row(
                                       children: [
                                         Expanded(flex: 2, child: Text(d['orderId'] as String, style: const TextStyle(fontSize: 11, color: AppTheme.textPrimary), overflow: TextOverflow.ellipsis)),
+                                        Expanded(flex: 2, child: Text(d['date'] != null ? _formatDate(d['date'] as DateTime) : 'N/A', style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary), overflow: TextOverflow.ellipsis)),
                                         Expanded(flex: 2, child: Text(d['vehicleNumber'] as String, style: const TextStyle(fontSize: 11, color: AppTheme.textPrimary), overflow: TextOverflow.ellipsis)),
                                         Expanded(flex: 2, child: Text('${d['capacityKg']}', textAlign: TextAlign.right, style: const TextStyle(fontSize: 11, color: AppTheme.textPrimary))),
                                         Expanded(flex: 2, child: Text('${d['weightUsed']}', textAlign: TextAlign.right, style: const TextStyle(fontSize: 11, color: AppTheme.textPrimary))),
