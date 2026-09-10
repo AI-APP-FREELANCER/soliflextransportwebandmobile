@@ -1126,92 +1126,129 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
           ],
         ),
         const SizedBox(height: 8),
-        Container(
-          decoration: BoxDecoration(
-            border: Border.all(color: AppTheme.darkBorder, width: 0.5),
-            borderRadius: BorderRadius.circular(6),
-          ),
-          child: Column(
-            children: [
-              // Header -- fixed-width leading/trailing columns (their
-              // content length is bounded) with Route as the one column
-              // that actually grows, instead of every column stretching
-              // across the full card width and leaving large empty gaps.
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                decoration: BoxDecoration(
-                  color: AppTheme.primaryOrange.withOpacity(0.1),
-                  borderRadius: const BorderRadius.only(
-                    topLeft: Radius.circular(6),
-                    topRight: Radius.circular(6),
+        // Same column set as the CSV export below -- the table used to show
+        // only Order ID/Date/Route/Status while the export had 10 columns.
+        // Scrolls horizontally on narrower screens instead of squeezing or
+        // overflowing, since header and rows share this exact width list.
+        Builder(
+          builder: (context) {
+            const columnWidths = <double>[90, 90, 140, 140, 90, 90, 80, 90, 80, 100];
+            const columnGap = 12.0;
+            const rowHorizontalPadding = 24.0; // 12px on each side, matches the Padding/Container below
+            final totalWidth = columnWidths.reduce((a, b) => a + b) +
+                columnGap * (columnWidths.length - 1) +
+                rowHorizontalPadding;
+
+            Widget headerCell(String label, double width, {bool alignEnd = false}) => SizedBox(
+                  width: width,
+                  child: Text(
+                    label,
+                    textAlign: alignEnd ? TextAlign.right : TextAlign.left,
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppTheme.textPrimary),
+                  ),
+                );
+
+            Widget dataCell(String text, double width, {bool alignEnd = false, bool emphasize = false}) => SizedBox(
+                  width: width,
+                  child: Text(
+                    text,
+                    textAlign: alignEnd ? TextAlign.right : TextAlign.left,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: emphasize ? AppTheme.textPrimary : AppTheme.textSecondary,
+                      fontSize: 12,
+                      fontWeight: emphasize ? FontWeight.w600 : FontWeight.normal,
+                    ),
+                  ),
+                );
+
+            return Container(
+              decoration: BoxDecoration(
+                border: Border.all(color: AppTheme.darkBorder, width: 0.5),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: SizedBox(
+                  width: totalWidth,
+                  child: Column(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: AppTheme.primaryOrange.withOpacity(0.1),
+                          borderRadius: const BorderRadius.only(
+                            topLeft: Radius.circular(6),
+                            topRight: Radius.circular(6),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            headerCell('Order ID', columnWidths[0]),
+                            const SizedBox(width: columnGap),
+                            headerCell('Date', columnWidths[1]),
+                            const SizedBox(width: columnGap),
+                            headerCell('Source', columnWidths[2]),
+                            const SizedBox(width: columnGap),
+                            headerCell('Destination', columnWidths[3]),
+                            const SizedBox(width: columnGap),
+                            headerCell('Vehicle', columnWidths[4]),
+                            const SizedBox(width: columnGap),
+                            headerCell('Trip Type', columnWidths[5]),
+                            const SizedBox(width: columnGap),
+                            headerCell('Weight (kg)', columnWidths[6], alignEnd: true),
+                            const SizedBox(width: columnGap),
+                            headerCell('Invoice (₹)', columnWidths[7], alignEnd: true),
+                            const SizedBox(width: columnGap),
+                            headerCell('Toll (₹)', columnWidths[8], alignEnd: true),
+                            const SizedBox(width: columnGap),
+                            headerCell('Status', columnWidths[9], alignEnd: true),
+                          ],
+                        ),
+                      ),
+                      Container(
+                        constraints: const BoxConstraints(maxHeight: 260),
+                        child: ListView.separated(
+                          shrinkWrap: true,
+                          itemCount: orders.length,
+                          separatorBuilder: (context, index) => Divider(height: 1, color: AppTheme.darkBorder),
+                          itemBuilder: (context, index) {
+                            final order = orders[index];
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                              child: Row(
+                                children: [
+                                  dataCell(order.orderId, columnWidths[0], emphasize: true),
+                                  const SizedBox(width: columnGap),
+                                  dataCell(order.effectiveDate != null ? _formatDate(order.effectiveDate!) : 'N/A', columnWidths[1]),
+                                  const SizedBox(width: columnGap),
+                                  dataCell(order.source, columnWidths[2]),
+                                  const SizedBox(width: columnGap),
+                                  dataCell(order.destination, columnWidths[3]),
+                                  const SizedBox(width: columnGap),
+                                  dataCell(order.vehicleNumber ?? 'N/A', columnWidths[4]),
+                                  const SizedBox(width: columnGap),
+                                  dataCell(order.tripType.replaceAll('-Trip-Vendor', '').replaceAll('-', ' '), columnWidths[5]),
+                                  const SizedBox(width: columnGap),
+                                  dataCell('${order.getTotalWeight()}', columnWidths[6], alignEnd: true),
+                                  const SizedBox(width: columnGap),
+                                  dataCell('₹${order.getTotalInvoiceAmount()}', columnWidths[7], alignEnd: true),
+                                  const SizedBox(width: columnGap),
+                                  dataCell('₹${order.getTotalTollCharges()}', columnWidths[8], alignEnd: true),
+                                  const SizedBox(width: columnGap),
+                                  dataCell(order.orderStatus, columnWidths[9], alignEnd: true),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                child: const Row(
-                  children: [
-                    SizedBox(width: 90, child: Text('Order ID', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppTheme.textPrimary))),
-                    SizedBox(width: 12),
-                    SizedBox(width: 90, child: Text('Date', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppTheme.textPrimary))),
-                    SizedBox(width: 12),
-                    Expanded(child: Text('Route', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppTheme.textPrimary))),
-                    SizedBox(width: 12),
-                    SizedBox(width: 100, child: Text('Status', textAlign: TextAlign.right, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppTheme.textPrimary))),
-                  ],
-                ),
               ),
-              Container(
-                constraints: const BoxConstraints(maxHeight: 260),
-                child: ListView.separated(
-                  shrinkWrap: true,
-                  itemCount: orders.length,
-                  separatorBuilder: (context, index) => Divider(height: 1, color: AppTheme.darkBorder),
-                  itemBuilder: (context, index) {
-                    final order = orders[index];
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                      child: Row(
-                        children: [
-                          SizedBox(
-                            width: 90,
-                            child: Text(
-                              order.orderId,
-                              style: const TextStyle(color: AppTheme.textPrimary, fontSize: 12, fontWeight: FontWeight.w600),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          SizedBox(
-                            width: 90,
-                            child: Text(
-                              order.effectiveDate != null ? _formatDate(order.effectiveDate!) : 'N/A',
-                              style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Text(
-                              '${order.source} → ${order.destination}',
-                              style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          SizedBox(
-                            width: 100,
-                            child: Text(
-                              order.orderStatus,
-                              textAlign: TextAlign.right,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
+            );
+          },
         ),
       ],
     );
@@ -1658,6 +1695,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
                       ),
                     ),
                     Expanded(
+                      flex: 1,
+                      child: Text(
+                        'Orders',
+                        textAlign: TextAlign.right,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                          color: AppTheme.textPrimary,
+                        ),
+                      ),
+                    ),
+                    Expanded(
                       flex: 2,
                       child: Text(
                         'Total Cost',
@@ -1707,6 +1756,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
                   itemBuilder: (context, index) {
                     final row = financialRows[index];
                     final type = row['type'] as String;
+                    final orderCount = row['orders'] as int;
                     final totalCost = row['totalCost'] as int;
                     final avgCostPerOrder = row['avgCostPerOrder'] as double;
                     final avgCostPerKg = row['avgCostPerKg'] as double;
@@ -1732,6 +1782,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
                                 color: AppTheme.textPrimary,
                               ),
                               overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          Expanded(
+                            flex: 1,
+                            child: Text(
+                              '$orderCount',
+                              textAlign: TextAlign.right,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: AppTheme.textSecondary,
+                              ),
                             ),
                           ),
                           Expanded(
