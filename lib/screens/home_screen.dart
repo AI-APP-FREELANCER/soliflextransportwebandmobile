@@ -1020,6 +1020,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
                   ),
             ),
             const SizedBox(height: 16),
+            // All Orders -- every order in the currently applied filter
+            // (date range, or a future search filter), one row per order.
+            // Unlike the sections below, this always matches "Total Orders".
+            _buildAllOrdersTable(context, filteredOrders),
+            const SizedBox(height: 16),
             // Utilization Analysis Table
             _buildUtilizationAnalysisTable(context, filteredOrders),
             if (showFinancialBreakdown) ...[
@@ -1032,6 +1037,140 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildAllOrdersTable(BuildContext context, List<OrderModel> orders) {
+    if (orders.isEmpty) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'All Orders',
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  color: AppTheme.textPrimary,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                ),
+          ),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppTheme.darkSurface,
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: AppTheme.darkBorder, width: 0.5),
+            ),
+            child: const Text(
+              'No orders found in the selected date range.',
+              style: TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: 12,
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'All Orders (${orders.length})',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      color: AppTheme.textPrimary,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
+              ),
+            ),
+            TextButton.icon(
+              onPressed: () {
+                final rows = <List<dynamic>>[
+                  ['Order ID', 'Date', 'Source', 'Destination', 'Vehicle', 'Trip Type', 'Weight (kg)', 'Invoice Amount (₹)', 'Toll Charges (₹)', 'Status'],
+                  ...orders.map((o) => [
+                        o.orderId,
+                        o.effectiveDate != null ? _formatDate(o.effectiveDate!) : 'N/A',
+                        o.source,
+                        o.destination,
+                        o.vehicleNumber ?? '',
+                        o.tripType,
+                        o.getTotalWeight(),
+                        o.getTotalInvoiceAmount(),
+                        o.getTotalTollCharges(),
+                        o.orderStatus,
+                      ]),
+                ];
+                ExportUtils.downloadCsv('all_orders_${_dateRangeFileSuffix()}.csv', rows);
+              },
+              icon: const Icon(Icons.download, size: 14),
+              label: const Text('Export', style: TextStyle(fontSize: 12)),
+              style: TextButton.styleFrom(
+                foregroundColor: AppTheme.primaryOrange,
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Container(
+          constraints: const BoxConstraints(maxHeight: 260),
+          decoration: BoxDecoration(
+            color: AppTheme.darkSurface,
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: AppTheme.darkBorder, width: 0.5),
+          ),
+          child: ListView.separated(
+            shrinkWrap: true,
+            itemCount: orders.length,
+            separatorBuilder: (context, index) => Divider(height: 1, color: AppTheme.darkBorder),
+            itemBuilder: (context, index) {
+              final order = orders[index];
+              return Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      flex: 2,
+                      child: Text(
+                        order.orderId,
+                        style: const TextStyle(color: AppTheme.textPrimary, fontSize: 12, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                    Expanded(
+                      flex: 2,
+                      child: Text(
+                        order.effectiveDate != null ? _formatDate(order.effectiveDate!) : 'N/A',
+                        style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                      ),
+                    ),
+                    Expanded(
+                      flex: 3,
+                      child: Text(
+                        '${order.source} → ${order.destination}',
+                        style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    Expanded(
+                      flex: 2,
+                      child: Text(
+                        order.orderStatus,
+                        textAlign: TextAlign.end,
+                        style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 
