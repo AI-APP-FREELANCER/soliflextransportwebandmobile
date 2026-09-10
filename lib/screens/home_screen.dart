@@ -136,23 +136,53 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
     }
   }
 
+  // Uses two single-month pickers (each with visible prev/next month
+  // navigation) instead of showDateRangePicker, whose default calendar view
+  // only supports going back via an undiscoverable vertical scroll gesture.
   Future<void> _openCustomDateRangePicker() async {
-    final picked = await showDateRangePicker(
+    final now = DateTime.now();
+    final firstAllowedDate = DateTime(2020, 1, 1);
+
+    final fromDate = await showDatePicker(
       context: context,
-      firstDate: DateTime(2020, 1, 1),
-      lastDate: DateTime.now(),
-      initialDateRange: (_customFromDate != null && _customToDate != null)
-          ? DateTimeRange(start: _customFromDate!, end: _customToDate!)
-          : null,
+      helpText: 'SELECT START DATE',
+      initialDate: _customFromDate ?? now,
+      firstDate: firstAllowedDate,
+      lastDate: now,
     );
-    if (picked != null && mounted) {
-      setState(() {
-        _customFromDate = picked.start;
-        _customToDate = picked.end;
-        _selectedDateRange = 'Custom Range';
-      });
-    }
+    if (fromDate == null || !mounted) return;
+
+    final defaultToDate = _customToDate != null && !_customToDate!.isBefore(fromDate)
+        ? _customToDate!
+        : (now.isBefore(fromDate) ? fromDate : now);
+    final toDate = await showDatePicker(
+      context: context,
+      helpText: 'SELECT END DATE',
+      initialDate: defaultToDate,
+      firstDate: fromDate,
+      lastDate: now,
+    );
+    if (toDate == null || !mounted) return;
+
+    setState(() {
+      _customFromDate = fromDate;
+      _customToDate = toDate;
+      _selectedDateRange = 'Custom Range';
+    });
   }
+
+  String _formatDate(DateTime date) => '${date.day}/${date.month}/${date.year}';
+
+  String _customRangeLabel() =>
+      (_customFromDate != null && _customToDate != null)
+          ? '${_formatDate(_customFromDate!)} - ${_formatDate(_customToDate!)}'
+          : 'Custom Range';
+
+  // Used for export filenames so a custom range doesn't collide with
+  // previously exported "Custom_Range" files.
+  String _dateRangeFileSuffix() => (_selectedDateRange == 'Custom Range')
+      ? _customRangeLabel().replaceAll(' ', '').replaceAll('/', '-')
+      : _selectedDateRange.replaceAll(' ', '_');
 
   List<OrderModel> _getFilteredOrders(List<OrderModel> orders) {
     final startDate = _getDateRangeStart();
@@ -471,9 +501,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
                                                 items: ['Current Week', 'Previous Week', 'Last 15 Days', 'Month to Date', 'Custom Range']
                                                     .map((range) => DropdownMenuItem(
                                                           value: range,
-                                                          child: Text(range == 'Custom Range' && _customFromDate != null && _customToDate != null
-                                                              ? '${_customFromDate!.day}/${_customFromDate!.month}/${_customFromDate!.year} – ${_customToDate!.day}/${_customToDate!.month}/${_customToDate!.year}'
-                                                              : range),
+                                                          child: Text(range),
                                                         ))
                                                     .toList(),
                                                 onChanged: (value) {
@@ -484,6 +512,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
                                                   }
                                                 },
                                               ),
+                                              if (_selectedDateRange == 'Custom Range' &&
+                                                  _customFromDate != null &&
+                                                  _customToDate != null) ...[
+                                                const SizedBox(width: 8),
+                                                Text(
+                                                  '(${_customRangeLabel()})',
+                                                  style: const TextStyle(
+                                                    color: AppTheme.textSecondary,
+                                                    fontSize: 12,
+                                                  ),
+                                                ),
+                                              ],
                                             ],
                                           ),
                                         ),
@@ -1089,7 +1129,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
                         '${(d['utilization'] as double).toStringAsFixed(1)}%',
                       ]),
                 ];
-                ExportUtils.downloadCsv('truck_utilization_${_selectedDateRange.replaceAll(' ', '_')}.csv', rows);
+                ExportUtils.downloadCsv('truck_utilization_${_dateRangeFileSuffix()}.csv', rows);
               },
               icon: const Icon(Icons.download, size: 14),
               label: const Text('Export', style: TextStyle(fontSize: 12)),
@@ -1366,7 +1406,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
                         (r['avgCostPerKg'] as double).toStringAsFixed(2),
                       ]),
                 ];
-                ExportUtils.downloadCsv('financial_breakdown_${_selectedDateRange.replaceAll(' ', '_')}.csv', rows);
+                ExportUtils.downloadCsv('financial_breakdown_${_dateRangeFileSuffix()}.csv', rows);
               },
               icon: const Icon(Icons.download, size: 14),
               label: const Text('Export', style: TextStyle(fontSize: 12)),
@@ -1712,7 +1752,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
                                   '${(d['utilization'] as double).toStringAsFixed(1)}%',
                                 ]),
                           ];
-                          ExportUtils.downloadCsv('low_utilization_${_selectedDateRange.replaceAll(' ', '_')}.csv', rows);
+                          ExportUtils.downloadCsv('low_utilization_${_dateRangeFileSuffix()}.csv', rows);
                         },
                         icon: const Icon(Icons.download, size: 14),
                         label: const Text('Export', style: TextStyle(fontSize: 12)),
