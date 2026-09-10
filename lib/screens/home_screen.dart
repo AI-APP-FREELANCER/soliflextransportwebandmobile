@@ -187,13 +187,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
   List<OrderModel> _getFilteredOrders(List<OrderModel> orders) {
     final startDate = _getDateRangeStart();
     final endDate = _getDateRangeEnd();
+    // Bound by calendar day, not by the exact instant _getDateRangeStart/End
+    // return. The previous "-1 day / +1 day" padding was meant to make the
+    // comparison inclusive, but it actually widened the window by a full
+    // extra day on each side whenever effectiveDate carried a time-of-day
+    // (which createdAt-based dates always do) -- e.g. a Custom Range of
+    // 1-9 Sep would still match an order timestamped Aug 31 at 18:00,
+    // since that's "after" (1 Sep minus 1 day = 31 Aug at 00:00).
+    final rangeStart = DateTime(startDate.year, startDate.month, startDate.day);
+    final rangeEnd = DateTime(endDate.year, endDate.month, endDate.day, 23, 59, 59, 999);
     return orders.where((order) {
       // Bucket by the actual trip/bill date when the order has one;
       // orders created before that field existed fall back to createdAt.
       final effectiveDate = order.effectiveDate;
       if (effectiveDate == null) return false;
-      return effectiveDate.isAfter(startDate.subtract(const Duration(days: 1))) &&
-             effectiveDate.isBefore(endDate.add(const Duration(days: 1)));
+      return !effectiveDate.isBefore(rangeStart) && !effectiveDate.isAfter(rangeEnd);
     }).toList();
   }
 
