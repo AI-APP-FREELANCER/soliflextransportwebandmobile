@@ -15,7 +15,11 @@ import '../widgets/searchable_location_dropdown.dart';
 
 class AmendmentModal extends StatefulWidget {
   final OrderModel order;
-  final Function(List<Map<String, dynamic>> newSegments, List<Map<String, dynamic>> existingSegmentEdits) onAmend;
+  final Function(
+    List<Map<String, dynamic>> newSegments,
+    List<Map<String, dynamic>> existingSegmentEdits,
+    String? tripDate,
+  ) onAmend;
 
   const AmendmentModal({
     super.key,
@@ -47,6 +51,10 @@ class _AmendmentModalState extends State<AmendmentModal> {
   final Map<int, TextEditingController> _weightEditControllers = {};
   final Map<int, int> _weightEdits = {};
 
+  // Trip/bill date, editable here so a wrong date entered at order creation
+  // can be corrected -- pre-filled with the order's current value.
+  DateTime? _selectedTripDate;
+
   @override
   void dispose() {
     for (final controller in _weightEditControllers.values) {
@@ -59,6 +67,7 @@ class _AmendmentModalState extends State<AmendmentModal> {
   void initState() {
     super.initState();
     _liveOrder = widget.order;
+    _selectedTripDate = _liveOrder.tripDateAsLocalDate;
     // For Round Trip: Initialize with single empty segment (B → C)
     // For Round Trip: Source should be B (destination of segment 1, not last segment's destination)
     // For other trip types: Initialize with one empty segment from last segment's destination
@@ -134,6 +143,8 @@ class _AmendmentModalState extends State<AmendmentModal> {
                     ],
                   ),
                   Divider(color: AppTheme.darkBorder),
+                  const SizedBox(height: 16),
+                  _buildTripDateField(),
                   const SizedBox(height: 16),
                   Builder(
                     builder: (context) {
@@ -291,7 +302,13 @@ class _AmendmentModalState extends State<AmendmentModal> {
                             final existingSegmentEdits = _weightEdits.entries
                                 .map((e) => {'segment_id': e.key, 'material_weight': e.value})
                                 .toList();
-                            widget.onAmend(_newSegments, existingSegmentEdits);
+                            final tripDate = _selectedTripDate;
+                            final tripDateString = tripDate == null
+                                ? null
+                                : '${tripDate.year.toString().padLeft(4, '0')}-'
+                                    '${tripDate.month.toString().padLeft(2, '0')}-'
+                                    '${tripDate.day.toString().padLeft(2, '0')}';
+                            widget.onAmend(_newSegments, existingSegmentEdits, tripDateString);
                           }
                         },
                         style: ElevatedButton.styleFrom(
@@ -382,6 +399,52 @@ class _AmendmentModalState extends State<AmendmentModal> {
           Navigator.of(dialogContext).pop();
           _reloadLiveOrder();
         },
+      ),
+    );
+  }
+
+  Future<void> _openTripDatePicker() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      helpText: 'SELECT TRIP / BILL DATE',
+      initialDate: _selectedTripDate ?? now,
+      firstDate: DateTime(2020, 1, 1),
+      lastDate: now,
+    );
+    if (picked != null && mounted) {
+      setState(() => _selectedTripDate = picked);
+    }
+  }
+
+  Widget _buildTripDateField() {
+    final selected = _selectedTripDate;
+    final label = selected == null
+        ? 'Not set (uses order creation date)'
+        : '${selected.day.toString().padLeft(2, '0')}/${selected.month.toString().padLeft(2, '0')}/${selected.year}';
+    return InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: _openTripDatePicker,
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          border: Border.all(color: Colors.grey.shade300),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.event, size: 18, color: Color(0xFFFF6600)),
+            const SizedBox(width: 8),
+            const Text(
+              'Trip / Bill Date',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+            ),
+            const Spacer(),
+            Text(label, style: const TextStyle(fontSize: 12)),
+            const SizedBox(width: 4),
+            const Icon(Icons.edit, size: 14, color: Colors.grey),
+          ],
+        ),
       ),
     );
   }

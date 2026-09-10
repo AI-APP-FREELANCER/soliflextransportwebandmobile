@@ -188,9 +188,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
     final startDate = _getDateRangeStart();
     final endDate = _getDateRangeEnd();
     return orders.where((order) {
-      if (order.createdAt == null) return false;
-      return order.createdAt!.isAfter(startDate.subtract(const Duration(days: 1))) &&
-             order.createdAt!.isBefore(endDate.add(const Duration(days: 1)));
+      // Bucket by the actual trip/bill date when the order has one;
+      // orders created before that field existed fall back to createdAt.
+      final effectiveDate = order.effectiveDate;
+      if (effectiveDate == null) return false;
+      return effectiveDate.isAfter(startDate.subtract(const Duration(days: 1))) &&
+             effectiveDate.isBefore(endDate.add(const Duration(days: 1)));
     }).toList();
   }
 

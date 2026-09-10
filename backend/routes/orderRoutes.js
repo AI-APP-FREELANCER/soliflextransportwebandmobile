@@ -90,15 +90,27 @@ router.post('/create-order', async (req, res) => {
       vehicleNumber,
       segments, // For Multiple trip type - array of segment objects
       invoiceAmount, // For Single/Round/Internal trips - optional manual override
-      tollCharges // For Single/Round/Internal trips - optional manual override
+      tollCharges, // For Single/Round/Internal trips - optional manual override
+      tripDate // The actual trip/bill date (YYYY-MM-DD) -- distinct from created_at
     } = req.body;
-    
+
     // CRITICAL FIX: Validate required fields based on trip type
     // For Multiple Trip, materialWeight and materialType are in segments, not top-level
     if (!userId) {
       return res.status(400).json({
         success: false,
         message: 'Missing required field: userId'
+      });
+    }
+
+    // Required so month-based dashboards/reports/exports bucket this order
+    // under the month the trip/bill actually happened, instead of falling
+    // back to created_at (the record-save timestamp, which can lag the
+    // real trip by days and misfile it into the wrong month).
+    if (!tripDate || !/^\d{4}-\d{2}-\d{2}$/.test(tripDate) || Number.isNaN(new Date(tripDate).getTime())) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing or invalid required field: tripDate (expected YYYY-MM-DD)'
       });
     }
     
@@ -565,6 +577,7 @@ router.post('/create-order', async (req, res) => {
       vehicle_number: vehicleNumber || '',
       order_status: 'Open',
       created_at: csvService.getISTTimestamp(),
+      trip_date: tripDate,
       creator_department: creatorDepartment || '',
       creator_user_id: userId.toString(), // CRITICAL FIX: Track creator user ID
       creator_name: creatorName || '', // Track creator's full name
@@ -1101,7 +1114,7 @@ async function recalcSegmentRate(segment, order, isMultipleTrip) {
 // POST /api/amend-order - Amend an existing order by adding new segments
 router.post('/amend-order', async (req, res) => {
   try {
-    const { orderId, newSegments, existingSegmentEdits, userId } = req.body;
+    const { orderId, newSegments, existingSegmentEdits, userId, tripDate } = req.body;
 
     const hasNewSegments = Array.isArray(newSegments) && newSegments.length > 0;
     const hasExistingSegmentEdits = Array.isArray(existingSegmentEdits) && existingSegmentEdits.length > 0;
@@ -1110,6 +1123,14 @@ router.post('/amend-order', async (req, res) => {
       return res.status(400).json({
         success: false,
         message: 'Order ID and at least one of newSegments or existingSegmentEdits are required'
+      });
+    }
+
+    // Optional correction to the trip/bill date recorded at order creation.
+    if (tripDate !== undefined && (!/^\d{4}-\d{2}-\d{2}$/.test(tripDate) || Number.isNaN(new Date(tripDate).getTime()))) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid tripDate (expected YYYY-MM-DD)'
       });
     }
     // Round Trip validation below expects an array even when this amendment
@@ -1598,6 +1619,7 @@ router.post('/amend-order', async (req, res) => {
       trip_segments: updatedSegments,
       order_status: 'Open', // Reset to Open requiring re-approval
       is_amended: 'Yes',
+      trip_date: tripDate || order.trip_date,
       order_category: orderCategory, // Recalculate category
       total_weight: projectedTotals.total_weight.toString(),
       total_invoice_amount: projectedTotals.total_invoice_amount.toString(),

@@ -1230,7 +1230,7 @@ class OrderDetailModal extends StatelessWidget {
       context: detailContext,
       builder: (dialogContext) => AmendmentModal(
         order: order,
-        onAmend: (newSegments, existingSegmentEdits) async {
+        onAmend: (newSegments, existingSegmentEdits, tripDate) async {
           if (user == null) {
             ScaffoldMessenger.of(detailContext).showSnackBar(
               const SnackBar(
@@ -1247,6 +1247,7 @@ class OrderDetailModal extends StatelessWidget {
             newSegments: newSegments,
             userId: user.userId, // Pass userId for audit trail
             existingSegmentEdits: existingSegmentEdits,
+            tripDate: tripDate,
           );
           
           if (detailContext.mounted) {

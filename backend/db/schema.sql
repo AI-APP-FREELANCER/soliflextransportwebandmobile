@@ -78,6 +78,12 @@ create table if not exists orders (
   vehicle_number text default '',
   order_status text,
   created_at text,
+  -- The actual date the trip/bill belongs to (YYYY-MM-DD, no time/timezone
+  -- component -- it's a calendar date, not an instant). Distinct from
+  -- created_at, which is just when the record was saved and can lag the
+  -- real trip by days, misfiling month-based reports. Null on orders
+  -- created before this field existed.
+  trip_date text,
   creator_department text,
   creator_user_id int null references users(user_id),
   creator_name text,
@@ -112,7 +118,13 @@ create table if not exists orders (
   exit_approved_by_member_name text
 );
 
+-- `create table if not exists` above is a no-op against a database that
+-- already has the orders table (i.e. every existing deployment), so new
+-- columns must also be added explicitly here to reach them.
+alter table orders add column if not exists trip_date text;
+
 create index if not exists orders_created_at_idx on orders(created_at);
+create index if not exists orders_trip_date_idx on orders(trip_date);
 create index if not exists orders_user_id_idx on orders(user_id);
 
 create table if not exists notifications (

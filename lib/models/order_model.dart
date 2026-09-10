@@ -135,6 +135,12 @@ class OrderModel {
   final String? vehicleNumber;
   final String orderStatus;
   final DateTime? createdAt;
+  // The actual trip/bill date (YYYY-MM-DD), distinct from createdAt (when
+  // the record was saved). Kept as a plain date string rather than a
+  // DateTime -- a calendar date has no time-of-day/timezone component, and
+  // parsing it through DateTime risks exactly the UTC/local shift bug this
+  // field exists to avoid. Null on orders created before this field existed.
+  final String? tripDate;
   final List<TripSegment> tripSegments;
   final bool isAmended;
   final String originalTripType;
@@ -184,6 +190,7 @@ class OrderModel {
     this.vehicleNumber,
     required this.orderStatus,
     this.createdAt,
+    this.tripDate,
     required this.tripSegments,
     this.isAmended = false,
     this.originalTripType = 'Single-Trip-Vendor',
@@ -275,6 +282,9 @@ class OrderModel {
       vehicleNumber: json['vehicle_number']?.toString(),
       orderStatus: json['order_status'] ?? 'Open',
       createdAt: json['created_at'] != null ? DateTime.tryParse(json['created_at']) : null,
+      tripDate: (json['trip_date'] != null && json['trip_date'].toString().isNotEmpty)
+          ? json['trip_date'].toString()
+          : null,
       tripSegments: segments,
       isAmended: json['is_amended']?.toString().toLowerCase() == 'yes' || json['is_amended'] == true,
       originalTripType: json['original_trip_type'] ?? json['trip_type'] ?? 'Single-Trip-Vendor',
@@ -375,6 +385,7 @@ class OrderModel {
       'vehicle_number': vehicleNumber,
       'order_status': orderStatus,
       'created_at': createdAt?.toIso8601String(),
+      if (tripDate != null) 'trip_date': tripDate,
       'trip_segments': tripSegments.map((s) => s.toJson()).toList(),
       'is_amended': isAmended ? 'Yes' : 'No',
       'original_trip_type': originalTripType,
@@ -410,6 +421,28 @@ class OrderModel {
       if (exitApprovedByMemberName != null) 'exit_approved_by_member_name': exitApprovedByMemberName,
     };
   }
+
+  // Manually split rather than DateTime.parse/tryParse -- a bare "YYYY-MM-DD"
+  // string is exactly the case where Dart's ISO parsing has historically
+  // disagreed on UTC vs local between platforms, which is the whole bug
+  // class this field exists to avoid.
+  DateTime? get tripDateAsLocalDate {
+    final value = tripDate;
+    if (value == null) return null;
+    final parts = value.split('-');
+    if (parts.length != 3) return null;
+    final year = int.tryParse(parts[0]);
+    final month = int.tryParse(parts[1]);
+    final day = int.tryParse(parts[2]);
+    if (year == null || month == null || day == null) return null;
+    return DateTime(year, month, day);
+  }
+
+  // The date this order should be attributed to for month-based
+  // filtering/reporting/exports: the actual trip/bill date when known,
+  // falling back to the record-creation timestamp for orders that predate
+  // the trip_date field.
+  DateTime? get effectiveDate => tripDateAsLocalDate ?? createdAt;
 
   // Getter methods to calculate totals from segments if not stored
   int getTotalWeight() {

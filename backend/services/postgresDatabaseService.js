@@ -570,6 +570,7 @@ async function readOrders(executor) {
             vehicle_number as "vehicle_number",
             order_status as "order_status",
             created_at as "created_at",
+            trip_date as "trip_date",
             creator_department as "creator_department",
             creator_user_id as "creator_user_id",
             creator_name as "creator_name",
@@ -686,7 +687,7 @@ async function writeOrder(order, executor) {
     await pool.query(
       `insert into orders (
         order_id, user_id, source, destination, material_weight, material_type,
-        trip_type, vehicle_id, vehicle_number, order_status, created_at,
+        trip_type, vehicle_id, vehicle_number, order_status, created_at, trip_date,
         creator_department, creator_user_id, creator_name,
         trip_segments, is_amended, original_trip_type, order_category,
         total_weight, total_invoice_amount, total_toll_charges,
@@ -700,18 +701,18 @@ async function writeOrder(order, executor) {
         exit_approved_by_timestamp, exit_approved_by_member_name
       ) values (
         $1,$2,$3,$4,$5,$6,
-        $7,$8,$9,$10,$11,
-        $12,$13,$14,
-        $15,$16,$17,$18,
-        $19,$20,$21,
-        $22,$23,$24,
-        $25,$26,$27,
-        $28,$29,$30,$31,
-        $32,$33,$34,
-        $35,$36,
-        $37,$38,$39,
-        $40,$41,
-        $42,$43
+        $7,$8,$9,$10,$11,$12,
+        $13,$14,$15,
+        $16,$17,$18,$19,
+        $20,$21,$22,
+        $23,$24,$25,
+        $26,$27,$28,
+        $29,$30,$31,$32,
+        $33,$34,$35,
+        $36,$37,
+        $38,$39,$40,
+        $41,$42,
+        $43,$44
       )`,
       [
         order.order_id,
@@ -725,6 +726,7 @@ async function writeOrder(order, executor) {
         order.vehicle_number || '',
         order.order_status || 'Open',
         order.created_at || new Date().toISOString(),
+        order.trip_date || null,
         order.creator_department || '',
         order.creator_user_id ? parseInt(order.creator_user_id, 10) : null,
         order.creator_name || '',
@@ -802,7 +804,8 @@ async function writeOrder(order, executor) {
               stores_validation_timestamp = $39,
               vehicle_exited_timestamp = $40,
               exit_approved_by_timestamp = $41,
-              exit_approved_by_member_name = $42
+              exit_approved_by_member_name = $42,
+              trip_date = coalesce($43, trip_date)
         where order_id = $1`,
       [
         order.order_id,
@@ -847,6 +850,7 @@ async function writeOrder(order, executor) {
         order.vehicle_exited_timestamp || '',
         order.exit_approved_by_timestamp || '',
         order.exit_approved_by_member_name || '',
+        order.trip_date || null,
       ]
     );
   }

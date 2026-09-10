@@ -540,11 +540,13 @@ class ApiService {
     List<Map<String, dynamic>>? segments, // For Multiple trip type
     int? invoiceAmount,
     int? tollCharges,
+    required String tripDate, // Actual trip/bill date, 'YYYY-MM-DD'
   }) async {
     try {
       final body = <String, dynamic>{
         'userId': userId,
         'tripType': tripType,
+        'tripDate': tripDate,
         if (vehicleId != null) 'vehicleId': vehicleId,
         if (vehicleNumber != null) 'vehicleNumber': vehicleNumber,
       };
@@ -603,6 +605,7 @@ class ApiService {
     required List<Map<String, dynamic>> newSegments,
     required String userId, // Add userId for audit trail
     List<Map<String, dynamic>>? existingSegmentEdits, // Weight corrections to already-placed segments
+    String? tripDate, // Correction to the trip/bill date, 'YYYY-MM-DD'
   }) async {
     try {
       final response = await http.post(
@@ -614,6 +617,7 @@ class ApiService {
           'userId': userId, // Include userId for audit trail
           if (existingSegmentEdits != null && existingSegmentEdits.isNotEmpty)
             'existingSegmentEdits': existingSegmentEdits,
+          if (tripDate != null) 'tripDate': tripDate,
         }),
       );
 

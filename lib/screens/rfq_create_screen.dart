@@ -41,6 +41,13 @@ class _RFQCreateScreenState extends State<RFQCreateScreen> {
   
   // Trip type selection
   String _selectedTripType = 'Single-Trip-Vendor'; // Single-Trip-Vendor, Round-Trip-Vendor, Multiple-Trip-Vendor
+
+  // The actual trip/bill date -- kept separate from createdAt (set by the
+  // server at save time) so entering this order's bill a few days late
+  // doesn't misfile it into the wrong month on dashboards/reports/exports.
+  // No default: staff must actively pick it rather than silently getting
+  // "today", which is exactly the bug this field exists to prevent.
+  DateTime? _selectedTripDate;
   
   // Multiple trip segments
   List<Map<String, dynamic>> _multipleSegments = [];
@@ -362,6 +369,20 @@ class _RFQCreateScreenState extends State<RFQCreateScreen> {
     }
   }
 
+  Future<void> _openTripDatePicker() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      helpText: 'SELECT TRIP / BILL DATE',
+      initialDate: _selectedTripDate ?? now,
+      firstDate: DateTime(2020, 1, 1),
+      lastDate: now,
+    );
+    if (picked != null && mounted) {
+      setState(() => _selectedTripDate = picked);
+    }
+  }
+
   Future<void> _handleCreateRFQ() async {
     try {
       // Step 1: Validate form
@@ -369,6 +390,11 @@ class _RFQCreateScreenState extends State<RFQCreateScreen> {
       if (!_formKey.currentState!.validate()) {
         print('[RFQ Create] Form validation failed');
         _showErrorModal('Form Validation Failed', 'Please fill in all required fields correctly.');
+        return;
+      }
+
+      if (_selectedTripDate == null) {
+        _showErrorModal('Missing Information', 'Please select the trip / bill date.');
         return;
       }
 
@@ -757,6 +783,9 @@ class _RFQCreateScreenState extends State<RFQCreateScreen> {
         segments: segments,
         invoiceAmount: finalInvoiceAmount ?? 0, // CRITICAL FIX: Ensure not null
         tollCharges: finalTollCharges ?? 0, // CRITICAL FIX: Ensure not null
+        tripDate: '${_selectedTripDate!.year.toString().padLeft(4, '0')}-'
+            '${_selectedTripDate!.month.toString().padLeft(2, '0')}-'
+            '${_selectedTripDate!.day.toString().padLeft(2, '0')}',
       );
 
       print('[RFQ Create] Step 9: Backend response received');
@@ -906,7 +935,12 @@ class _RFQCreateScreenState extends State<RFQCreateScreen> {
                   // Trip Type Selection
                   _buildTripTypeSelector(),
                   const SizedBox(height: 24),
-                  
+
+                  // Trip / Bill Date -- the actual date this trip happened,
+                  // not when it's being entered into the system.
+                  _buildTripDateField(),
+                  const SizedBox(height: 24),
+
                   // Conditional Form Fields based on Trip Type
                   if (_selectedTripType == 'Single-Trip-Vendor' || 
                       _selectedTripType == 'Round-Trip-Vendor')
@@ -1183,6 +1217,52 @@ class _RFQCreateScreenState extends State<RFQCreateScreen> {
                   ),
                 ],
               ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Trip / Bill Date Field
+  Widget _buildTripDateField() {
+    final selected = _selectedTripDate;
+    final label = selected == null
+        ? 'Select date'
+        : '${selected.day.toString().padLeft(2, '0')}/${selected.month.toString().padLeft(2, '0')}/${selected.year}';
+    return Container(
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.grey.shade300),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: _openTripDatePicker,
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Row(
+            children: [
+              const Icon(Icons.event, color: Color(0xFFFF6600)),
+              const SizedBox(width: 8),
+              const Text(
+                'Trip / Bill Date *',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFFFF6600),
+                ),
+              ),
+              const Spacer(),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: selected == null ? FontWeight.normal : FontWeight.w600,
+                  color: selected == null ? Colors.grey.shade600 : Colors.black87,
+                ),
+              ),
+              const SizedBox(width: 4),
+              const Icon(Icons.arrow_drop_down, color: Colors.grey),
             ],
           ),
         ),

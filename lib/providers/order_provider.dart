@@ -70,6 +70,7 @@ class OrderProvider with ChangeNotifier {
     List<Map<String, dynamic>>? segments, // For Multiple trip type
     int? invoiceAmount,
     int? tollCharges,
+    required String tripDate,
   }) async {
     _isLoading = true;
     _error = null;
@@ -88,6 +89,7 @@ class OrderProvider with ChangeNotifier {
         segments: segments,
         invoiceAmount: invoiceAmount,
         tollCharges: tollCharges,
+        tripDate: tripDate,
       );
 
       if (result['success'] == true) {
@@ -123,6 +125,7 @@ class OrderProvider with ChangeNotifier {
     required List<Map<String, dynamic>> newSegments,
     required String userId, // Add userId for audit trail
     List<Map<String, dynamic>>? existingSegmentEdits, // Weight corrections to already-placed segments
+    String? tripDate,
   }) async {
     _isLoading = true;
     _error = null;
@@ -134,6 +137,7 @@ class OrderProvider with ChangeNotifier {
         newSegments: newSegments,
         userId: userId, // Pass userId for audit trail
         existingSegmentEdits: existingSegmentEdits,
+        tripDate: tripDate,
       );
 
       if (result['success'] == true) {

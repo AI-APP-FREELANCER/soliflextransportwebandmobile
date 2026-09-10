@@ -1369,6 +1369,10 @@ async function writeOrder(order) {
   if (!order.original_total_toll_charges) order.original_total_toll_charges = '';
   if (!order.original_segment_count) order.original_segment_count = '';
   
+  // trip_date is the actual trip/bill date (YYYY-MM-DD), distinct from
+  // created_at. Defaults to '' for orders that predate this field.
+  if (!order.trip_date) order.trip_date = '';
+
   // Ensure vehicle fields default to empty string if null/undefined to prevent CSV formatting errors
   if (!order.vehicle_id || order.vehicle_id === null || order.vehicle_id === undefined) order.vehicle_id = '';
   if (!order.vehicle_number || order.vehicle_number === null || order.vehicle_number === undefined) order.vehicle_number = '';
@@ -1412,6 +1416,7 @@ async function writeOrder(order) {
       { id: 'vehicle_number', title: 'vehicle_number' },
       { id: 'order_status', title: 'order_status' },
       { id: 'created_at', title: 'created_at' },
+      { id: 'trip_date', title: 'trip_date' },
       { id: 'creator_department', title: 'creator_department' },
       { id: 'creator_user_id', title: 'creator_user_id' }, // CRITICAL FIX: Track creator user ID
       { id: 'creator_name', title: 'creator_name' }, // Track creator's full name
@@ -1512,6 +1517,7 @@ async function updateOrderStatus(orderId, newStatus, updateData = {}) {
       { id: 'vehicle_number', title: 'vehicle_number' },
       { id: 'order_status', title: 'order_status' },
       { id: 'created_at', title: 'created_at' },
+      { id: 'trip_date', title: 'trip_date' },
       { id: 'creator_department', title: 'creator_department' },
       { id: 'creator_user_id', title: 'creator_user_id' }, // CRITICAL FIX: Track creator user ID
       { id: 'creator_name', title: 'creator_name' }, // Track creator's full name
