@@ -5,8 +5,10 @@ import '../providers/order_provider.dart';
 import '../models/order_model.dart';
 import '../models/vehicle_model.dart';
 import '../services/api_service.dart';
+import '../services/order_workflow_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/export_utils.dart';
+import '../utils/order_card_info.dart';
 import '../utils/order_edit_eligibility.dart';
 import '../utils/permission_utils.dart';
 import '../widgets/notification_badge.dart';
@@ -28,6 +30,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
   DateTime? _customToDate;
   List<VehicleModel> _vehicles = [];
   bool _isLoadingVehicles = false;
+  // Drives the All Orders table's always-visible horizontal scrollbar, so a
+  // narrow window doesn't silently hide the columns on the right.
+  final ScrollController _allOrdersHScroll = ScrollController();
+  // Same workflow rules the order cards use to decide an order's status.
+  final OrderWorkflowService _workflowService = OrderWorkflowService();
 
   @override
   void initState() {
@@ -53,6 +60,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     homeRouteObserver.unsubscribe(this);
+    _allOrdersHScroll.dispose();
     super.dispose();
   }
 
@@ -724,7 +732,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
     
     int totalInvoice = 0;
     int totalToll = 0;
-    
+    int totalOther = 0;
+
     for (var order in orders) {
       // Count by trip type
       if (tripTypeCount.containsKey(order.tripType)) {
@@ -737,7 +746,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
       
       totalInvoice += orderInvoice;
       totalToll += orderToll;
-      
+      totalOther += order.getTotalOtherCharges();
+
       if (tripTypeInvoice.containsKey(order.tripType)) {
         tripTypeInvoice[order.tripType] = (tripTypeInvoice[order.tripType] ?? 0) + orderInvoice;
         tripTypeToll[order.tripType] = (tripTypeToll[order.tripType] ?? 0) + orderToll;
@@ -750,6 +760,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
       'tripTypeToll': tripTypeToll,
       'totalInvoice': totalInvoice,
       'totalToll': totalToll,
+      'totalOther': totalOther,
       'totalOrders': orders.length,
     };
   }
@@ -904,7 +915,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
   Widget _buildRevenueCard(BuildContext context, Map<String, dynamic> metrics) {
     final totalInvoice = metrics['totalInvoice'] as int? ?? 0;
     final totalToll = metrics['totalToll'] as int? ?? 0;
-    final total = totalInvoice + totalToll;
+    final totalOther = metrics['totalOther'] as int? ?? 0;
+    // Everything charged on the orders: freight + toll + other charges. Same
+    // formula as "Total" in All Orders and "Total Cost" in Financial Breakdown.
+    final total = totalInvoice + totalToll + totalOther;
     
     return Card(
       elevation: 1,
@@ -931,6 +945,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
             _buildRevenueItem(context, 'Freight Charges', '₹$totalInvoice', Colors.green),
             const SizedBox(height: 8),
             _buildRevenueItem(context, 'Total Toll Charges', '₹$totalToll', Colors.blue),
+            const SizedBox(height: 8),
+            _buildRevenueItem(context, 'Other Charges', '₹$totalOther', Colors.purple),
             const Divider(height: 16, thickness: 0.5, color: AppTheme.darkBorder),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1031,7 +1047,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
             // All Orders -- every order in the currently applied filter
             // (date range, or a future search filter), one row per order.
             // Unlike the sections below, this always matches "Total Orders".
-            _buildAllOrdersTable(context, filteredOrders),
+            _buildAllOrdersTable(
+              context,
+              filteredOrders,
+              showFinancials: showFinancialBreakdown,
+            ),
             _buildSectionDivider(),
             // Utilization Analysis Table
             _buildUtilizationAnalysisTable(context, filteredOrders),
@@ -1057,7 +1077,265 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
     );
   }
 
-  Widget _buildAllOrdersTable(BuildContext context, List<OrderModel> orders) {
+  Widget _buildAllOrdersTable(
+    BuildContext context,
+    List<OrderModel> orders, {
+    required bool showFinancials,
+  }) {
+    // Single source of truth for this section: the on-screen table AND the
+    // CSV export are both generated from this list, so what is shown and what
+    // is exported cannot drift apart. Money columns follow the same rule as
+    // Revenue Summary / Financial Breakdown on this page
+    // (OrderEditEligibility.canViewOrderFinancials).
+    //
+    // All figures come from the same OrderModel getters the Order Detail
+    // screen and Financial Breakdown already use, so numbers reconcile:
+    //   Total = Invoice + Toll + Other  (same formula as Financial Breakdown).
+    int totalCost(OrderModel o) =>
+        o.getTotalInvoiceAmount() + o.getTotalTollCharges() + o.getTotalOtherCharges();
+    String dateOf(OrderModel o) =>
+        o.effectiveDate != null ? _formatDate(o.effectiveDate!) : 'N/A';
+    String shortTripType(OrderModel o) =>
+        o.tripType.replaceAll('-Trip-Vendor', '').replaceAll('-', ' ');
+    // Descriptions entered with "Other charges" (per segment), only for
+    // segments that actually carry an amount.
+    String otherChargesNote(OrderModel o) {
+      final notes = <String>[];
+      for (final s in o.tripSegments) {
+        if ((s.otherCharges ?? 0) <= 0) continue;
+        final d = (s.otherChargesDescription ?? '').trim();
+        if (d.isNotEmpty && !notes.contains(d)) notes.add(d);
+      }
+      return notes.join('; ');
+    }
+
+    VehicleModel? vehicleOf(OrderModel o) =>
+        OrderCardInfo.vehicleFor(_vehicles, o.vehicleNumber);
+    // The card only shows a utilisation badge once a vehicle is assigned.
+    String utilizationOf(OrderModel o) {
+      final v = vehicleOf(o);
+      return v == null ? 'N/A' : '${OrderCardInfo.utilizationPercent(o, v)}%';
+    }
+    // The card prints "(was N kg)" only when an amendment changed the weight.
+    String? originalWeightOf(OrderModel o) {
+      final original = o.originalTotalWeight;
+      return (original != null && original != o.getTotalWeight()) ? '$original' : null;
+    }
+
+    final columns = <_AllOrdersColumn>[
+      _AllOrdersColumn(
+        header: 'Order ID',
+        exportHeader: 'Order ID',
+        width: 90,
+        emphasize: true,
+        display: (o) => o.orderId,
+        export: (o) => o.orderId,
+      ),
+      _AllOrdersColumn(
+        header: 'Date',
+        exportHeader: 'Date',
+        width: 85,
+        display: dateOf,
+        export: dateOf,
+      ),
+      _AllOrdersColumn(
+        header: 'Source',
+        exportHeader: 'Source',
+        width: 100,
+        flexible: true,
+        display: (o) => o.source,
+        export: (o) => o.source,
+      ),
+      _AllOrdersColumn(
+        header: 'Destination',
+        exportHeader: 'Destination',
+        width: 100,
+        flexible: true,
+        display: (o) => o.destination,
+        export: (o) => o.destination,
+      ),
+      _AllOrdersColumn(
+        header: 'Vehicle',
+        exportHeader: 'Vehicle',
+        width: 95,
+        display: (o) => o.vehicleNumber ?? 'N/A',
+        export: (o) => o.vehicleNumber ?? '',
+      ),
+      _AllOrdersColumn(
+        header: 'Trip Type',
+        exportHeader: 'Trip Type',
+        width: 100,
+        display: shortTripType,
+        export: (o) => o.tripType,
+      ),
+      _AllOrdersColumn(
+        header: 'Weight (kg)',
+        exportHeader: 'Weight (kg)',
+        width: 80,
+        alignEnd: true,
+        display: (o) => '${o.getTotalWeight()}',
+        export: (o) => o.getTotalWeight(),
+      ),
+      _AllOrdersColumn(
+        header: 'Invoice (₹)',
+        exportHeader: 'Invoice Amount (₹)',
+        width: 90,
+        alignEnd: true,
+        financial: true,
+        headerTooltip: 'Freight / invoice amount',
+        display: (o) => '₹${o.getTotalInvoiceAmount()}',
+        export: (o) => o.getTotalInvoiceAmount(),
+      ),
+      _AllOrdersColumn(
+        header: 'Toll (₹)',
+        exportHeader: 'Toll Charges (₹)',
+        width: 80,
+        alignEnd: true,
+        financial: true,
+        headerTooltip: 'Toll charges',
+        display: (o) => '₹${o.getTotalTollCharges()}',
+        export: (o) => o.getTotalTollCharges(),
+      ),
+      _AllOrdersColumn(
+        header: 'Other (₹)',
+        exportHeader: 'Other Charges (₹)',
+        width: 80,
+        alignEnd: true,
+        financial: true,
+        headerTooltip: 'Other charges',
+        // Hover shows what the other charge was for, when one was entered.
+        cellTooltip: otherChargesNote,
+        display: (o) => '₹${o.getTotalOtherCharges()}',
+        export: (o) => o.getTotalOtherCharges(),
+      ),
+      _AllOrdersColumn(
+        header: '',
+        exportHeader: 'Other Charges Description',
+        width: 0,
+        financial: true,
+        exportOnly: true,
+        display: (o) => '',
+        export: otherChargesNote,
+      ),
+      _AllOrdersColumn(
+        header: 'Total (₹)',
+        exportHeader: 'Total Cost (₹)',
+        width: 90,
+        alignEnd: true,
+        financial: true,
+        emphasize: true,
+        headerTooltip: 'Invoice + Toll + Other charges',
+        display: (o) => '₹${totalCost(o)}',
+        export: totalCost,
+      ),
+      // Wording matches the status chip on the order card.
+      _AllOrdersColumn(
+        header: 'Status',
+        exportHeader: 'Status',
+        width: 100,
+        display: (o) => OrderCardInfo.statusDisplay(o, _workflowService),
+        export: (o) => OrderCardInfo.statusDisplay(o, _workflowService),
+      ),
+      // ---- Everything else the order card shows, so the dashboard and the
+      // export carry the same information as the card. ----
+      _AllOrdersColumn(
+        header: 'Amended',
+        exportHeader: 'Amended',
+        width: 75,
+        display: (o) => o.isAmended ? 'Yes' : 'No',
+        export: (o) => o.isAmended ? 'Yes' : 'No',
+      ),
+      _AllOrdersColumn(
+        header: 'Member',
+        exportHeader: 'Member',
+        width: 130,
+        display: (o) => o.creatorName ?? 'N/A',
+        export: (o) => o.creatorName ?? 'N/A',
+      ),
+      _AllOrdersColumn(
+        header: 'Department',
+        exportHeader: 'Department',
+        width: 150,
+        display: (o) => o.creatorDepartment ?? 'N/A',
+        export: (o) => o.creatorDepartment ?? 'N/A',
+      ),
+      _AllOrdersColumn(
+        header: 'Vehicle Type',
+        exportHeader: 'Vehicle Type',
+        width: 110,
+        display: (o) => OrderCardInfo.vehicleType(vehicleOf(o)),
+        export: (o) => OrderCardInfo.vehicleType(vehicleOf(o)),
+      ),
+      _AllOrdersColumn(
+        header: 'Utilization',
+        exportHeader: 'Utilization %',
+        width: 90,
+        alignEnd: true,
+        headerTooltip: 'Load as a share of the vehicle capacity',
+        display: (o) => utilizationOf(o),
+        export: (o) => utilizationOf(o),
+      ),
+      _AllOrdersColumn(
+        header: 'Route',
+        exportHeader: 'Route',
+        width: 230,
+        display: OrderCardInfo.routeSummary,
+        export: OrderCardInfo.routeSummary,
+      ),
+      _AllOrdersColumn(
+        header: 'Current Stage',
+        exportHeader: 'Current Stage',
+        width: 160,
+        display: OrderCardInfo.currentStage,
+        export: OrderCardInfo.currentStage,
+      ),
+      _AllOrdersColumn(
+        header: 'Flow Status',
+        exportHeader: 'Flow Status',
+        width: 110,
+        display: (o) => OrderCardInfo.flowStatus(o, _workflowService),
+        export: (o) => OrderCardInfo.flowStatus(o, _workflowService),
+      ),
+      _AllOrdersColumn(
+        header: 'Approval Status',
+        exportHeader: 'Approval Status',
+        width: 180,
+        display: OrderCardInfo.approvalStatus,
+        export: OrderCardInfo.approvalStatus,
+      ),
+      _AllOrdersColumn(
+        header: 'Original Wt (kg)',
+        exportHeader: 'Original Weight (kg)',
+        width: 110,
+        alignEnd: true,
+        headerTooltip: 'Weight before amendment (only when it changed)',
+        display: (o) => originalWeightOf(o) ?? '-',
+        export: (o) => originalWeightOf(o) ?? '',
+      ),
+      _AllOrdersColumn(
+        header: 'Creator ID',
+        exportHeader: 'Creator ID',
+        width: 80,
+        display: (o) => o.creatorUserId ?? '',
+        export: (o) => o.creatorUserId ?? '',
+      ),
+      _AllOrdersColumn(
+        header: 'Created At',
+        exportHeader: 'Created At',
+        width: 130,
+        display: OrderCardInfo.createdLabel,
+        export: OrderCardInfo.createdLabel,
+      ),
+      _AllOrdersColumn(
+        header: 'Order Category',
+        exportHeader: 'Order Category',
+        width: 140,
+        display: (o) => o.orderCategory,
+        export: (o) => o.orderCategory,
+      ),
+    ].where((c) => showFinancials || !c.financial).toList();
+    final displayColumns = columns.where((c) => !c.exportOnly).toList();
+
     if (orders.isEmpty) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1108,19 +1386,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
             TextButton.icon(
               onPressed: () {
                 final rows = <List<dynamic>>[
-                  ['Order ID', 'Date', 'Source', 'Destination', 'Vehicle', 'Trip Type', 'Weight (kg)', 'Invoice Amount (₹)', 'Toll Charges (₹)', 'Status'],
-                  ...orders.map((o) => [
-                        o.orderId,
-                        o.effectiveDate != null ? _formatDate(o.effectiveDate!) : 'N/A',
-                        o.source,
-                        o.destination,
-                        o.vehicleNumber ?? '',
-                        o.tripType,
-                        o.getTotalWeight(),
-                        o.getTotalInvoiceAmount(),
-                        o.getTotalTollCharges(),
-                        o.orderStatus,
-                      ]),
+                  columns.map((c) => c.exportHeader).toList(),
+                  ...orders.map((o) => columns.map((c) => c.export(o)).toList()),
                 ];
                 ExportUtils.downloadCsv('all_orders_${_dateRangeFileSuffix()}.csv', rows);
               },
@@ -1134,124 +1401,125 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
           ],
         ),
         const SizedBox(height: 8),
-        // Same column set as the CSV export below -- the table used to show
-        // only Order ID/Date/Route/Status while the export had 10 columns.
-        // Scrolls horizontally on narrower screens instead of squeezing or
-        // overflowing, since header and rows share this exact width list.
-        Builder(
-          builder: (context) {
-            const columnWidths = <double>[90, 90, 140, 140, 90, 90, 80, 90, 80, 100];
-            const columnGap = 12.0;
-            const rowHorizontalPadding = 24.0; // 12px on each side, matches the Padding/Container below
-            final totalWidth = columnWidths.reduce((a, b) => a + b) +
-                columnGap * (columnWidths.length - 1) +
+        // Header and rows are generated from the same column list as the CSV
+        // export above, so every exported column (money columns included)
+        // is also visible here. Source/Destination absorb spare width on wide
+        // screens (capped, so columns don't drift far apart); on narrow
+        // screens the table scrolls horizontally, with a scrollbar that stays
+        // visible so the columns off to the right are discoverable.
+        LayoutBuilder(
+          builder: (context, constraints) {
+            const columnGap = 8.0;
+            const rowHorizontalPadding = 24.0; // 12px each side; matches header/row padding below
+            const maxFlexGrowth = 160.0;
+
+            final minTableWidth = displayColumns.fold<double>(0, (sum, c) => sum + c.width) +
+                columnGap * (displayColumns.length - 1) +
                 rowHorizontalPadding;
+            final flexCount = displayColumns.where((c) => c.flexible).length;
+            final available =
+                constraints.maxWidth.isFinite ? constraints.maxWidth : minTableWidth;
+            final spare = available - minTableWidth;
+            var growth = (flexCount == 0 || spare <= 0) ? 0.0 : spare / flexCount;
+            if (growth > maxFlexGrowth) growth = maxFlexGrowth;
+            final tableWidth = minTableWidth + growth * flexCount;
+            final contentWidth = available > tableWidth ? available : tableWidth;
+            final needsHorizontalScroll = tableWidth > available;
 
-            Widget headerCell(String label, double width, {bool alignEnd = false}) => SizedBox(
-                  width: width,
-                  child: Text(
-                    label,
-                    textAlign: alignEnd ? TextAlign.right : TextAlign.left,
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppTheme.textPrimary),
-                  ),
-                );
+            double widthOf(_AllOrdersColumn c) => c.flexible ? c.width + growth : c.width;
 
-            Widget dataCell(String text, double width, {bool alignEnd = false, bool emphasize = false}) => SizedBox(
-                  width: width,
-                  child: Text(
-                    text,
-                    textAlign: alignEnd ? TextAlign.right : TextAlign.left,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: emphasize ? AppTheme.textPrimary : AppTheme.textSecondary,
-                      fontSize: 12,
-                      fontWeight: emphasize ? FontWeight.w600 : FontWeight.normal,
-                    ),
-                  ),
-                );
+            List<Widget> withGaps(List<Widget> cells) {
+              final out = <Widget>[];
+              for (var i = 0; i < cells.length; i++) {
+                if (i > 0) out.add(const SizedBox(width: columnGap));
+                out.add(cells[i]);
+              }
+              return out;
+            }
+
+            Widget headerCell(_AllOrdersColumn c) {
+              Widget label = Text(
+                c.header,
+                textAlign: c.alignEnd ? TextAlign.right : TextAlign.left,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppTheme.textPrimary),
+              );
+              if (c.headerTooltip != null) {
+                label = Tooltip(message: c.headerTooltip!, child: label);
+              }
+              return SizedBox(width: widthOf(c), child: label);
+            }
+
+            Widget dataCell(_AllOrdersColumn c, OrderModel o) {
+              Widget value = Text(
+                c.display(o),
+                textAlign: c.alignEnd ? TextAlign.right : TextAlign.left,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: c.emphasize ? AppTheme.textPrimary : AppTheme.textSecondary,
+                  fontSize: 12,
+                  fontWeight: c.emphasize ? FontWeight.w600 : FontWeight.normal,
+                ),
+              );
+              final tip = c.cellTooltip?.call(o);
+              if (tip != null && tip.isNotEmpty) {
+                value = Tooltip(message: tip, child: value);
+              }
+              return SizedBox(width: widthOf(c), child: value);
+            }
 
             return Container(
               decoration: BoxDecoration(
                 border: Border.all(color: AppTheme.darkBorder, width: 0.5),
                 borderRadius: BorderRadius.circular(6),
               ),
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: SizedBox(
-                  width: totalWidth,
-                  child: Column(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                        decoration: BoxDecoration(
-                          color: AppTheme.primaryOrange.withOpacity(0.1),
-                          borderRadius: const BorderRadius.only(
-                            topLeft: Radius.circular(6),
-                            topRight: Radius.circular(6),
+              child: Scrollbar(
+                controller: _allOrdersHScroll,
+                thumbVisibility: needsHorizontalScroll,
+                child: SingleChildScrollView(
+                  controller: _allOrdersHScroll,
+                  scrollDirection: Axis.horizontal,
+                  child: SizedBox(
+                    width: contentWidth,
+                    child: Column(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: AppTheme.primaryOrange.withOpacity(0.1),
+                            borderRadius: const BorderRadius.only(
+                              topLeft: Radius.circular(6),
+                              topRight: Radius.circular(6),
+                            ),
+                          ),
+                          child: Row(
+                            children: withGaps(displayColumns.map(headerCell).toList()),
                           ),
                         ),
-                        child: Row(
-                          children: [
-                            headerCell('Order ID', columnWidths[0]),
-                            const SizedBox(width: columnGap),
-                            headerCell('Date', columnWidths[1]),
-                            const SizedBox(width: columnGap),
-                            headerCell('Source', columnWidths[2]),
-                            const SizedBox(width: columnGap),
-                            headerCell('Destination', columnWidths[3]),
-                            const SizedBox(width: columnGap),
-                            headerCell('Vehicle', columnWidths[4]),
-                            const SizedBox(width: columnGap),
-                            headerCell('Trip Type', columnWidths[5]),
-                            const SizedBox(width: columnGap),
-                            headerCell('Weight (kg)', columnWidths[6], alignEnd: true),
-                            const SizedBox(width: columnGap),
-                            headerCell('Invoice (₹)', columnWidths[7], alignEnd: true),
-                            const SizedBox(width: columnGap),
-                            headerCell('Toll (₹)', columnWidths[8], alignEnd: true),
-                            const SizedBox(width: columnGap),
-                            headerCell('Status', columnWidths[9], alignEnd: true),
-                          ],
+                        Container(
+                          constraints: const BoxConstraints(maxHeight: 260),
+                          child: ListView.separated(
+                            shrinkWrap: true,
+                            itemCount: orders.length,
+                            separatorBuilder: (context, index) => Divider(height: 1, color: AppTheme.darkBorder),
+                            itemBuilder: (context, index) {
+                              final order = orders[index];
+                              return Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                child: Row(
+                                  children: withGaps(
+                                    displayColumns.map((c) => dataCell(c, order)).toList(),
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
                         ),
-                      ),
-                      Container(
-                        constraints: const BoxConstraints(maxHeight: 260),
-                        child: ListView.separated(
-                          shrinkWrap: true,
-                          itemCount: orders.length,
-                          separatorBuilder: (context, index) => Divider(height: 1, color: AppTheme.darkBorder),
-                          itemBuilder: (context, index) {
-                            final order = orders[index];
-                            return Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                              child: Row(
-                                children: [
-                                  dataCell(order.orderId, columnWidths[0], emphasize: true),
-                                  const SizedBox(width: columnGap),
-                                  dataCell(order.effectiveDate != null ? _formatDate(order.effectiveDate!) : 'N/A', columnWidths[1]),
-                                  const SizedBox(width: columnGap),
-                                  dataCell(order.source, columnWidths[2]),
-                                  const SizedBox(width: columnGap),
-                                  dataCell(order.destination, columnWidths[3]),
-                                  const SizedBox(width: columnGap),
-                                  dataCell(order.vehicleNumber ?? 'N/A', columnWidths[4]),
-                                  const SizedBox(width: columnGap),
-                                  dataCell(order.tripType.replaceAll('-Trip-Vendor', '').replaceAll('-', ' '), columnWidths[5]),
-                                  const SizedBox(width: columnGap),
-                                  dataCell('${order.getTotalWeight()}', columnWidths[6], alignEnd: true),
-                                  const SizedBox(width: columnGap),
-                                  dataCell('₹${order.getTotalInvoiceAmount()}', columnWidths[7], alignEnd: true),
-                                  const SizedBox(width: columnGap),
-                                  dataCell('₹${order.getTotalTollCharges()}', columnWidths[8], alignEnd: true),
-                                  const SizedBox(width: columnGap),
-                                  dataCell(order.orderStatus, columnWidths[9], alignEnd: true),
-                                ],
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                    ],
+                        // Room for the horizontal scrollbar so it doesn't
+                        // sit on top of the last visible row.
+                        if (needsHorizontalScroll) const SizedBox(height: 10),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -2154,4 +2422,50 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ro
       ],
     );
   }
+}
+
+/// One column of the Home dashboard's "All Orders" table. The on-screen table
+/// and its CSV export are both generated from a list of these, which is what
+/// keeps the two in step.
+class _AllOrdersColumn {
+  const _AllOrdersColumn({
+    required this.header,
+    required this.exportHeader,
+    required this.width,
+    required this.display,
+    required this.export,
+    this.flexible = false,
+    this.alignEnd = false,
+    this.emphasize = false,
+    this.financial = false,
+    this.exportOnly = false,
+    this.headerTooltip,
+    this.cellTooltip,
+  });
+
+  /// Header text on screen.
+  final String header;
+
+  /// Header text in the exported CSV.
+  final String exportHeader;
+
+  /// Minimum on-screen width in logical pixels.
+  final double width;
+
+  /// Whether this column may grow with spare width on wide screens.
+  final bool flexible;
+  final bool alignEnd;
+  final bool emphasize;
+
+  /// Money column: only shown/exported to users allowed to view order
+  /// financials (see OrderEditEligibility.canViewOrderFinancials).
+  final bool financial;
+
+  /// Present in the CSV export but not as a column on screen.
+  final bool exportOnly;
+
+  final String? headerTooltip;
+  final String Function(OrderModel order) display;
+  final dynamic Function(OrderModel order) export;
+  final String? Function(OrderModel order)? cellTooltip;
 }

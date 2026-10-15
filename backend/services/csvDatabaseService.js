@@ -1161,41 +1161,40 @@ function calculateOrderTotals(tripSegments, orderTripType = null) {
   const isMultipleTrip = orderTripType === 'Multiple-Trip-Vendor';
 
   if (isRoundTrip && segments.length >= 2) {
-    // Part 3: Round Trip logic: Only chargeable segments contribute
+    // Round Trip: every charge entered on any leg counts toward the order's
+    // cost, with one deliberate exception below.
+    //
+    // WEIGHT is only taken from the chargeable legs, never summed across all
+    // legs: the return / display-only legs repeat the outbound load purely
+    // for display, so adding them would double count the material.
+    const readInt = (v) => parseInt(v || '0') || 0;
+    const outbound = segments[0];
+    const finalLeg = segments[segments.length - 1];
+    const addCharges = (seg) => {
+      totalInvoiceAmount += readInt(seg.invoice_amount);
+      totalTollCharges += readInt(seg.toll_charges);
+      totalOtherCharges += readInt(seg.other_charges);
+    };
+
+    totalWeight += readInt(outbound.material_weight);
+    addCharges(outbound);
+
     if (segments.length === 2) {
-      // Initial Round Trip: Only Segment 1 (A → B) contributes
-      // Segment 2 (B → A) has invoice_amount = 0 and does not contribute
-      const segment1 = segments[0];
-      totalWeight += parseInt(segment1.material_weight || '0') || 0;
-      totalInvoiceAmount += parseInt(segment1.invoice_amount || '0') || 0;
-      totalTollCharges += parseInt(segment1.toll_charges || '0') || 0;
-      totalOtherCharges += parseInt(segment1.other_charges || '0') || 0;
-
-      console.log(`[Round Trip Totals] Initial Round Trip (2 segments):`);
-      console.log(`  Segment 1 (chargeable): Weight: ${segment1.material_weight} kg, Invoice: ₹${segment1.invoice_amount}`);
-      console.log(`  Segment 2 (non-chargeable): Weight: ${segments[1].material_weight} kg, Invoice: ₹${segments[1].invoice_amount} (excluded)`);
-    } else if (segments.length >= 3) {
-      // Amended Round Trip: Only Segment 1 (A → B) and final segment (C → A) contribute
-      // Middle segments (B → C) are display-only and do not contribute
-      const segment1 = segments[0]; // Segment 1: A → B (chargeable)
-      const finalSegment = segments[segments.length - 1]; // Final segment: C → A (chargeable)
-
-      totalWeight += parseInt(segment1.material_weight || '0') || 0;
-      totalInvoiceAmount += parseInt(segment1.invoice_amount || '0') || 0;
-      totalTollCharges += parseInt(segment1.toll_charges || '0') || 0;
-      totalOtherCharges += parseInt(segment1.other_charges || '0') || 0;
-
-      totalWeight += parseInt(finalSegment.material_weight || '0') || 0;
-      totalInvoiceAmount += parseInt(finalSegment.invoice_amount || '0') || 0;
-      totalTollCharges += parseInt(finalSegment.toll_charges || '0') || 0;
-      totalOtherCharges += parseInt(finalSegment.other_charges || '0') || 0;
-
-      console.log(`[Round Trip Totals] Amended Round Trip (${segments.length} segments):`);
-      console.log(`  Segment 1 (chargeable): Weight: ${segment1.material_weight} kg, Invoice: ₹${segment1.invoice_amount}`);
+      // Initial Round Trip: [A → B, B → A]. The return leg is created with
+      // freight/toll of 0 (non-chargeable by default), but anything entered
+      // on it afterwards (e.g. via segment pricing) is real cost and counts.
+      addCharges(finalLeg);
+    } else {
+      // Amended Round Trip: [A → B, B → C (display-only), ..., C → A].
+      totalWeight += readInt(finalLeg.material_weight);
+      addCharges(finalLeg);
+      // The display-only middle leg is an auto-generated COPY of the outbound
+      // leg's weight / freight / toll. Counting those again would double-bill
+      // the trip, so only what is unique to a middle leg -- other charges,
+      // which are never copied -- is added.
       for (let i = 1; i < segments.length - 1; i++) {
-        console.log(`  Segment ${i + 1} (display-only): Weight: ${segments[i].material_weight} kg, Invoice: ₹${segments[i].invoice_amount} (excluded)`);
+        totalOtherCharges += readInt(segments[i].other_charges);
       }
-      console.log(`  Segment ${segments.length} (chargeable): Weight: ${finalSegment.material_weight} kg, Invoice: ₹${finalSegment.invoice_amount}`);
     }
   } else {
     // Part 1: Multiple Trip and Single Trip: ALL segments contribute (cumulative sum)
