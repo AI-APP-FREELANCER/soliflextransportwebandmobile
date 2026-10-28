@@ -179,6 +179,7 @@ class _WorkflowScreenState extends State<WorkflowScreen> {
     String action,
     String? comments, {
     String? location,
+    int? stageIndex,
   }) async {
     if (_order == null) return;
 
@@ -218,6 +219,7 @@ class _WorkflowScreenState extends State<WorkflowScreen> {
         userId: user.userId,
         comments: comments,
         location: workflowLocation,
+        stageIndex: stageIndex,
       );
 
       if (result['success'] == true) {
@@ -673,6 +675,7 @@ class _WorkflowScreenState extends State<WorkflowScreen> {
                         userDepartment,
                         userRole,
                         location: step.location,
+                        stageIndex: step.stageIndex,
                       )),
                       const SizedBox(height: 16),
                     ],
@@ -694,6 +697,7 @@ class _WorkflowScreenState extends State<WorkflowScreen> {
                         userDepartment,
                         userRole,
                         location: step.location,
+                        stageIndex: step.stageIndex,
                       )),
                     ],
                   ],
@@ -712,16 +716,21 @@ class _WorkflowScreenState extends State<WorkflowScreen> {
     String userDepartment,
     String userRole, {
     String? location,
+    int? stageIndex,
   }) {
     if (_order == null) return const SizedBox.shrink();
 
-    // CRITICAL FIX: Find workflow step by both stage name AND location
-    // This is necessary because we now have 6 stages (3 origin + 3 destination) with same stage names
+    // Find the workflow step. A segment has 6 steps (3 origin + 3 destination)
+    // sharing stage names, and when its origin and destination are the same
+    // place they share locations too -- so stage + location alone would resolve
+    // every destination row to the (approved) origin step and show it as done.
+    // The exact step index tells them apart.
     WorkflowStep workflowStep;
-    final matchingSteps = segment.workflow.where((ws) => 
-      ws.stage == stage && 
-      (location == null || ws.location == location)
-    );
+    final matchingSteps = (stageIndex != null)
+        ? segment.workflow.where((ws) => ws.stage == stage && ws.stageIndex == stageIndex)
+        : segment.workflow.where((ws) =>
+            ws.stage == stage &&
+            (location == null || ws.location == location));
     if (matchingSteps.isNotEmpty) {
       workflowStep = matchingSteps.first;
     } else {
@@ -752,6 +761,7 @@ class _WorkflowScreenState extends State<WorkflowScreen> {
       stage,
       _order!.orderStatus,
       location: location ?? workflowStep.location,
+      stageIndex: stageIndex ?? workflowStep.stageIndex,
     );
 
     final isRejected = workflowStep.status == 'REJECTED';
@@ -809,7 +819,14 @@ class _WorkflowScreenState extends State<WorkflowScreen> {
       canRevoke: canRevoke,
       canCancel: canCancel,
       onAction: (action, comments) {
-        _handleWorkflowAction(segment, stage, action, comments, location: location ?? workflowStep.location);
+        _handleWorkflowAction(
+          segment,
+          stage,
+          action,
+          comments,
+          location: location ?? workflowStep.location,
+          stageIndex: stageIndex ?? workflowStep.stageIndex,
+        );
       },
     );
   }

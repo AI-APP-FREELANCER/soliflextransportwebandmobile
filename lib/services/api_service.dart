@@ -1025,6 +1025,9 @@ class ApiService {
     required String userId,
     String? comments,
     String? location,
+    // Exact step within the segment's 6 steps. Needed because stage + location
+    // alone is ambiguous when a segment starts and ends at the same place.
+    int? stageIndex,
   }) async {
     try {
       final response = await http.post(
@@ -1038,6 +1041,7 @@ class ApiService {
           'userId': userId,
           'comments': comments,
           if (location != null) 'location': location,
+          if (stageIndex != null) 'stageIndex': stageIndex,
         }),
       );
 

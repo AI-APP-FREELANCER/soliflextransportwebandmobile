@@ -13,6 +13,41 @@ class WorkflowActionError extends Error {
   }
 }
 
+// Picks the workflow step a /workflow-action request is about.
+//
+// Every segment has 6 steps (3 at the origin, 3 at the destination) that share
+// the same stage names. When a segment's origin and destination are the SAME
+// place -- e.g. an Internal Transfer "IAF unit-1 -> IAF unit-1", or an amended
+// order that gains such a leg -- they share locations too, so stage + location
+// alone cannot tell them apart. Taking the first match always resolved to the
+// (already approved) ORIGIN step, so the DESTINATION steps could never be
+// approved and the order never left En-Route.
+//
+// Clients send the step's stage_index to name it exactly. Older clients that
+// don't fall back to stage + location; if that is ambiguous, prefer the step
+// that is actually actionable (PENDING, or REJECTED when revoking) rather than
+// blindly the first one.
+function findWorkflowStepIndex(workflowSteps, { stage, location, stageIndex, action }) {
+  const hasIndex =
+    stageIndex !== undefined && stageIndex !== null && stageIndex !== '' && Number.isFinite(Number(stageIndex));
+  if (hasIndex) {
+    const wanted = Number(stageIndex);
+    const exact = workflowSteps.findIndex((ws) => ws.stage === stage && Number(ws.stage_index) === wanted);
+    if (exact !== -1) return exact;
+    // Steps without a usable stage_index (very old orders): use the lookup below.
+  }
+
+  const matches = [];
+  workflowSteps.forEach((ws, i) => {
+    if (ws.stage === stage && (!location || ws.location === location)) matches.push(i);
+  });
+  if (matches.length <= 1) return matches.length === 1 ? matches[0] : -1;
+
+  const wantedStatus = String(action || '').toUpperCase() === 'REVOKE' ? 'REJECTED' : 'PENDING';
+  const actionable = matches.find((i) => String(workflowSteps[i].status || '').toUpperCase() === wantedStatus);
+  return actionable !== undefined ? actionable : matches[0];
+}
+
 // GET /api/orders - Get all orders
 router.get('/orders', async (req, res) => {
   try {
@@ -1773,7 +1808,7 @@ router.post('/initialize-workflow', async (req, res) => {
 // POST /api/workflow-action - Perform workflow action (approve/reject/revoke/cancel)
 router.post('/workflow-action', async (req, res) => {
   try {
-    const { orderId, segmentId, stage, action, userId, comments, location } = req.body;
+    const { orderId, segmentId, stage, action, userId, comments, location, stageIndex } = req.body;
 
     if (!orderId || !segmentId || !stage || !action || !userId) {
       return res.status(400).json({
@@ -1859,12 +1894,9 @@ router.post('/workflow-action', async (req, res) => {
         return indexA - indexB;
       });
 
-      // CRITICAL FIX: Find workflow step by both stage name AND location
-      // This is necessary because we now have 6 stages (3 origin + 3 destination) with same stage names
-      const stepIndex = workflowSteps.findIndex(ws =>
-        ws.stage === stage &&
-        (!location || ws.location === location)
-      );
+      // Find the exact step (see findWorkflowStepIndex: stage name + location
+      // are not unique when a segment starts and ends at the same place).
+      const stepIndex = findWorkflowStepIndex(workflowSteps, { stage, location, stageIndex, action });
       if (stepIndex === -1) {
         throw new WorkflowActionError(404, 'Workflow step not found');
       }
@@ -1976,6 +2008,42 @@ router.post('/workflow-action', async (req, res) => {
           segment.segment_status = 'STORES_VERIFICATION_PENDING';
         } else if (stage === 'SECURITY_EXIT') {
           segment.segment_status = 'SECURITY_EXIT_PENDING';
+        }
+
+        // Rejecting a step flips the whole order to REJECTED (and frees its
+        // vehicle). Once the last rejected step is revoked the order must go
+        // back to En-Route, otherwise it stays REJECTED forever -- the
+        // completion check treats a REJECTED order as rejected regardless of
+        // its steps, so later approvals could never complete it.
+        workflowSteps[stepIndex] = workflowStep;
+        segment.workflow = workflowSteps;
+        segments[segmentIndex] = segment;
+        const stillBlocked = segments.some((seg) => {
+          let steps = seg.workflow;
+          if (typeof steps === 'string') {
+            try { steps = JSON.parse(steps); } catch (e) { steps = []; }
+          }
+          return Array.isArray(steps) && steps.some((ws) => {
+            const st = (ws.status || '').toUpperCase().trim();
+            return st === 'REJECTED' || st === 'CANCELLED' || st === 'CANCELED';
+          });
+        });
+        if ((order.order_status || '').toUpperCase().trim() === 'REJECTED' && !stillBlocked) {
+          order.order_status = 'En-Route';
+          console.log(`[Revoke] Order ${orderId} restored from REJECTED to En-Route`);
+          // The vehicle was freed when the order was rejected; book it again
+          // unless it has since been taken by another order.
+          if (order.vehicle_id && String(order.vehicle_id).trim() !== '') {
+            try {
+              const vehicles = await csvService.readVehicles();
+              const vehicle = vehicles.find((v) => String(v.vehicleId) === String(order.vehicle_id));
+              if (vehicle && vehicle.status === 'Free') {
+                await csvService.updateVehicleStatus(order.vehicle_id, 'Booked');
+              }
+            } catch (error) {
+              console.error(`[Revoke] Error re-booking vehicle ${order.vehicle_id}:`, error);
+            }
+          }
         }
       }
 

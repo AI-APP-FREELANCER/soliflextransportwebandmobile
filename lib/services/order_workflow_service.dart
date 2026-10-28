@@ -63,6 +63,7 @@ class OrderWorkflowService {
     required String userId,
     String? comments,
     String? location,
+    int? stageIndex,
   }) async {
     try {
       return await _apiService.performWorkflowAction(
@@ -73,6 +74,7 @@ class OrderWorkflowService {
         userId: userId,
         comments: comments,
         location: location,
+        stageIndex: stageIndex,
       );
     } catch (e) {
       return {
@@ -243,7 +245,7 @@ class OrderWorkflowService {
 
   // Check if a workflow stage is currently active (client-side sequential activation check)
   // CRITICAL FIX: Updated to handle 6 stages (3 origin + 3 destination) by position/index
-  bool isStageActive(TripSegment segment, String stage, String orderStatus, {String? location}) {
+  bool isStageActive(TripSegment segment, String stage, String orderStatus, {String? location, int? stageIndex}) {
     // CRITICAL FIX: Add explicit logging for stage activation
     print('[isStageActive] ========================================');
     print('[isStageActive] Checking stage activation:');
@@ -271,19 +273,28 @@ class OrderWorkflowService {
       return indexA.compareTo(indexB);
     });
 
-    // Find the current stage by both stage name AND location
+    // Find the current stage. Prefer the exact step index: stage name + location
+    // is NOT unique when a segment starts and ends at the same place (origin and
+    // destination steps then look identical), and picking the first match would
+    // return the origin step for the destination rows.
     WorkflowStep? currentStage;
-    if (location != null && location.isNotEmpty) {
-      currentStage = sortedSteps.firstWhere(
-        (ws) => ws.stage == stage && ws.location == location,
-        orElse: () => sortedSteps.firstWhere(
-          (ws) => ws.stage == stage,
-          orElse: () => sortedSteps.first,
-        ),
-      );
-    } else {
-      final matchingSteps = sortedSteps.where((ws) => ws.stage == stage);
-      currentStage = matchingSteps.isNotEmpty ? matchingSteps.first : null;
+    if (stageIndex != null) {
+      final exact = sortedSteps.where((ws) => ws.stage == stage && ws.stageIndex == stageIndex);
+      if (exact.isNotEmpty) currentStage = exact.first;
+    }
+    if (currentStage == null) {
+      if (location != null && location.isNotEmpty) {
+        currentStage = sortedSteps.firstWhere(
+          (ws) => ws.stage == stage && ws.location == location,
+          orElse: () => sortedSteps.firstWhere(
+            (ws) => ws.stage == stage,
+            orElse: () => sortedSteps.first,
+          ),
+        );
+      } else {
+        final matchingSteps = sortedSteps.where((ws) => ws.stage == stage);
+        currentStage = matchingSteps.isNotEmpty ? matchingSteps.first : null;
+      }
     }
 
     if (currentStage == null) {
