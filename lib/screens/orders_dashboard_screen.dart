@@ -43,6 +43,7 @@ class _OrdersDashboardScreenState extends State<OrdersDashboardScreen> {
   }
 
   Future<void> _loadOrders() async {
+    if (!mounted) return;
     final orderProvider = Provider.of<OrderProvider>(context, listen: false);
     await orderProvider.loadOrders();
   }
@@ -2062,7 +2063,11 @@ class OrderDetailModal extends StatelessWidget {
                           MaterialPageRoute(
                             builder: (context) => WorkflowScreen(orderId: order.orderId),
                           ),
-                        );
+                        ).then((_) {
+                          // Approvals made in the workflow screen change the order
+                          // status (e.g. En-Route -> Completed); refresh the tabs.
+                          onStatusUpdate();
+                        });
                       },
                       icon: const Icon(Icons.work),
                       label: const Text('View Workflow'),
